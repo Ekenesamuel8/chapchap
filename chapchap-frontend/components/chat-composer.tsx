@@ -1,11 +1,7 @@
 "use client";
 
 import { ChangeEvent, useRef } from "react";
-import {
-  Attachment,
-  ConversationScenario,
-  PromptSuggestion,
-} from "@/lib/types";
+import { Attachment } from "@/lib/types";
 import { MicIcon, PaperclipIcon, SendIcon } from "@/components/icons";
 
 type ChatComposerProps = {

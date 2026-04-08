@@ -6,6 +6,7 @@ type WalletHeaderProps = {
   balance: string;
   address: string;
   savings: string;
+  networkLabel: string;
   onCopy: () => void;
   onFundWallet: () => void;
 };
@@ -14,6 +15,7 @@ export function WalletHeader({
   balance,
   address,
   savings,
+  networkLabel,
   onCopy,
   onFundWallet,
 }: WalletHeaderProps) {
@@ -45,7 +47,7 @@ export function WalletHeader({
           Fund Wallet
         </button>
         <div className="rounded-full border border-white/10 bg-white/5 px-2 py-1 sm:px-4 sm:py-3 text-xs sm:text-sm text-white/[0.7]">
-          Etherlink / Tezos EVM
+          {networkLabel}
         </div>
       </div>
     </section>

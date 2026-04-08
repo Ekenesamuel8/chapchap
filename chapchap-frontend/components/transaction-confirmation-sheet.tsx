@@ -1,13 +1,15 @@
 "use client";
 
 import { BottomSheet } from "@/components/bottom-sheet";
-import { PaymentIntent } from "@/lib/types";
+import { PaymentIntentView } from "@/lib/types";
 
 type TransactionConfirmationSheetProps = {
   open: boolean;
   onClose: () => void;
   onConfirm: () => void;
-  paymentIntent: PaymentIntent;
+  paymentIntent: PaymentIntentView;
+  isSubmitting?: boolean;
+  errorMessage?: string | null;
 };
 
 export function TransactionConfirmationSheet({
@@ -15,14 +17,16 @@ export function TransactionConfirmationSheet({
   onClose,
   onConfirm,
   paymentIntent,
+  isSubmitting = false,
+  errorMessage = null,
 }: TransactionConfirmationSheetProps) {
   return (
     <BottomSheet open={open} onClose={onClose} title="Confirm transaction">
-      <div className="rounded-[1.6rem] border border-accent-soft/20 bg-gradient-to-br from-accent-soft/12 via-white/[0.03] to-accent-warm/12 p-5">
+      <div className="rounded-[1.6rem] border border-accent-soft/20 bg-gradient-to-br from-accent-soft/12 via-white/[0.03] to-accent-warm/12 p-4 sm:p-5">
         <div className="flex items-end justify-between gap-4">
           <div>
             <p className="text-sm text-white/[0.55]">Amount</p>
-            <p className="font-display text-3xl font-bold text-white">
+            <p className="font-display text-2xl font-bold text-white sm:text-3xl">
               {paymentIntent.amount} {paymentIntent.asset}
             </p>
           </div>
@@ -42,12 +46,24 @@ export function TransactionConfirmationSheet({
           <DetailRow label="Note" value={paymentIntent.note} />
           <DetailRow label="Schedule" value={paymentIntent.schedule} />
         </dl>
+
+        <p className="mt-4 text-xs leading-6 text-white/[0.56]">
+          This will submit a real blockchain transfer on the configured testnet
+          network after you confirm.
+        </p>
       </div>
+
+      {errorMessage ? (
+        <p className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+          {errorMessage}
+        </p>
+      ) : null}
 
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
         <button
           type="button"
           onClick={onClose}
+          disabled={isSubmitting}
           className="rounded-full border border-white/10 bg-white/5 px-4 py-3 font-semibold text-white/80"
         >
           Cancel
@@ -55,9 +71,10 @@ export function TransactionConfirmationSheet({
         <button
           type="button"
           onClick={onConfirm}
+          disabled={isSubmitting}
           className="rounded-full bg-white px-4 py-3 font-semibold text-black"
         >
-          Confirm
+          {isSubmitting ? "Submitting..." : "Confirm"}
         </button>
       </div>
     </BottomSheet>
@@ -66,9 +83,11 @@ export function TransactionConfirmationSheet({
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/[0.08] bg-black/20 px-4 py-3">
+    <div className="flex flex-col gap-2 rounded-2xl border border-white/[0.08] bg-black/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <dt className="text-sm text-white/50">{label}</dt>
-      <dd className="text-right text-sm font-medium text-white/[0.86]">{value}</dd>
+      <dd className="break-all text-left text-sm font-medium text-white/[0.86] sm:text-right">
+        {value || "Not provided"}
+      </dd>
     </div>
   );
 }

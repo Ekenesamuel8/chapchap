@@ -2,7 +2,7 @@ import { PromptSuggestion } from "@/lib/types";
 
 type PromptSuggestionsProps = {
   prompts: PromptSuggestion[];
-  onSelect: (scenario: PromptSuggestion["scenario"]) => void;
+  onSelect: (label: string) => void;
 };
 
 export function PromptSuggestions({
@@ -14,7 +14,7 @@ export function PromptSuggestions({
       {prompts.map((prompt) => (
         <button
           key={prompt.id}
-          onClick={() => onSelect(prompt.scenario)}
+          onClick={() => onSelect(prompt.label)}
           type="button"
           className="group flex w-full items-center gap-4 rounded-2xl border border-transparent px-1 py-1 text-left hover:border-white/[0.08] hover:bg-white/[0.03]"
         >

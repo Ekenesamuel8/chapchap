@@ -1,47 +1,60 @@
 "use client";
 
 import { SuccessIcon } from "@/components/icons";
-import { PaymentIntent } from "@/lib/types";
+import { SubmittedTransactionView } from "@/lib/types";
 
 type TransactionSuccessCardProps = {
-  paymentIntent: PaymentIntent;
+  transaction: SubmittedTransactionView;
   open: boolean;
   onDone: () => void;
 };
 
 export function TransactionSuccessCard({
-  paymentIntent,
+  transaction,
   open,
   onDone,
 }: TransactionSuccessCardProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm">
-      <div className="glass-panel edge-glow animate-float-up w-full max-w-md rounded-[2rem] border border-white/10 p-6 text-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/65 p-4 backdrop-blur-sm">
+      <div className="glass-panel edge-glow animate-float-up relative w-full max-w-md overflow-y-auto rounded-[2rem] border border-white/10 p-4 text-center max-h-[90vh] sm:p-6">
+        <button
+          type="button"
+          onClick={onDone}
+          aria-label="Close"
+          className="absolute right-4 top-4 inline-flex size-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-lg text-white/[0.8] hover:bg-white/10"
+        >
+          ×
+        </button>
         <div className="mx-auto flex size-16 items-center justify-center rounded-full bg-success/15 text-success">
           <SuccessIcon className="size-8" />
         </div>
-        <h3 className="mt-4 font-display text-3xl font-bold text-white">
-          Transaction Sent
+        <h3 className="mt-4 font-display text-2xl font-bold text-white sm:text-3xl">
+          Transaction Successful
         </h3>
         <p className="mt-2 text-sm leading-6 text-white/[0.68]">
-          {paymentIntent.amount} {paymentIntent.asset} to {paymentIntent.recipient}
+          {transaction.amount} {transaction.asset} to {transaction.recipient}
         </p>
 
         <div className="mt-5 rounded-[1.6rem] border border-white/10 bg-white/5 p-4 text-left">
-          <DetailRow label="Recipient" value={paymentIntent.recipient} />
-          <DetailRow label="Network" value={paymentIntent.network} />
-          <DetailRow label="Tx hash" value="0xb893...12d2" />
+          <DetailRow label="Recipient" value={transaction.recipient} />
+          <DetailRow label="Network" value={transaction.network} />
+          <DetailRow label="Tx hash" value={shortenHash(transaction.txHash)} />
+          <DetailRow label="Timestamp" value={transaction.submittedAt} />
         </div>
 
         <div className="mt-5 grid gap-3">
-          <button
-            type="button"
-            className="rounded-full bg-white px-4 py-3 font-semibold text-black"
-          >
-            View on Explorer
-          </button>
+          {transaction.explorerUrl ? (
+            <a
+              href={transaction.explorerUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-full bg-white px-4 py-3 font-semibold text-black"
+            >
+              View on Explorer
+            </a>
+          ) : null}
           <button
             type="button"
             onClick={onDone}
@@ -55,11 +68,16 @@ export function TransactionSuccessCard({
   );
 }
 
+function shortenHash(hash: string) {
+  if (hash.length <= 14) return hash;
+  return `${hash.slice(0, 8)}...${hash.slice(-6)}`;
+}
+
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-2 text-sm">
+    <div className="flex flex-col gap-1 py-2 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <span className="text-white/50">{label}</span>
-      <span className="font-medium text-white/[0.86]">{value}</span>
+      <span className="break-all font-medium text-white/[0.86]">{value}</span>
     </div>
   );
 }
