@@ -28,7 +28,7 @@ SECRET_KEY = os.environ.get(
     "django-insecure-change-me",
 )
 DEBUG = _get_bool("DEBUG", default=False)
-ALLOWED_HOSTS = _get_list("ALLOWED_HOSTS", default=["127.0.0.1", "localhost", "https://chapchap-rho.vercel.app"])
+ALLOWED_HOSTS = _get_list("ALLOWED_HOSTS", default=["127.0.0.1", "localhost", "https://chapchap-rho.vercel.app", "https://chapchap-at9y.onrender.com"])
 
 DJANGO_APPS = [
     "django.contrib.admin",
@@ -77,6 +77,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "https://chapchap-rho.vercel.app",
+    "https://chapchap-at9y.onrender.com",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
