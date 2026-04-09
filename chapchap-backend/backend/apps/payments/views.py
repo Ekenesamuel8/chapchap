@@ -5,8 +5,13 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .serializers import PaymentIntentSubmissionSerializer
-from .services import PaymentIntentSubmissionError, submit_payment_intent
+from .serializers import PaymentIntentSubmissionSerializer, TransactionHistorySerializer
+from .services import (
+    PaymentIntentSubmissionError,
+    build_dashboard_balance_payload,
+    list_transaction_history,
+    submit_payment_intent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +68,16 @@ class PaymentIntentSubmitView(APIView):
                 "status": submitted_payment.status,
                 "tx_hash": submitted_payment.tx_hash,
                 "explorer_url": submitted_payment.explorer_url,
+                "balance_summary": build_dashboard_balance_payload(user=request.user),
             },
             status=status.HTTP_200_OK,
         )
+
+
+class TransactionHistoryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):  # type: ignore[override]
+        entries = list_transaction_history(user=request.user)
+        serializer = TransactionHistorySerializer(entries, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)

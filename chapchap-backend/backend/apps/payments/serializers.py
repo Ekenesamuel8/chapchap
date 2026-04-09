@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import PaymentIntent
+from .models import PaymentIntent, TransactionHistory
 
 
 class PaymentIntentSubmissionSerializer(serializers.Serializer):
@@ -20,3 +20,25 @@ class PaymentIntentSubmissionSerializer(serializers.Serializer):
 
         self.context["payment_intent"] = payment_intent
         return attrs
+
+
+class TransactionHistorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TransactionHistory
+        fields = (
+            "id",
+            "transaction_type",
+            "asset_symbol",
+            "amount",
+            "network",
+            "recipient_address",
+            "sender_address",
+            "tx_hash",
+            "explorer_url",
+            "status",
+            "title",
+            "subtitle",
+            "metadata_json",
+            "created_at",
+            "updated_at",
+        )

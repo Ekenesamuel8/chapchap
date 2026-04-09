@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from decimal import Decimal
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db import close_old_connections
 from django.db import transaction
+from django.utils import timezone
 from eth_account import Account
 
 from apps.blockchain.services import (
@@ -27,6 +30,8 @@ from .models import BalanceSnapshot, WalletProfile
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
+_refresh_lock = threading.Lock()
+_refresh_in_flight: set[int] = set()
 
 DEFAULT_BALANCES: tuple[dict[str, Decimal | str | None], ...] = (
     *(
@@ -99,7 +104,23 @@ def get_latest_balance_snapshots(wallet: WalletProfile) -> list[BalanceSnapshot]
     return sorted(snapshots, key=lambda item: item.asset_symbol)
 
 
-def refresh_wallet_balances(wallet: WalletProfile) -> list[BalanceSnapshot]:
+def get_cached_wallet_balances(wallet: WalletProfile) -> list[BalanceSnapshot]:
+    existing = get_latest_balance_snapshots(wallet)
+    return existing or ensure_default_balance_snapshots(wallet)
+
+
+def should_refresh_wallet_balances(wallet: WalletProfile, *, ttl_seconds: int | None = None) -> bool:
+    ttl = ttl_seconds if ttl_seconds is not None else settings.BALANCE_REFRESH_TTL_SECONDS
+    if wallet.last_balance_refresh_at is None:
+        return True
+    age = (timezone.now() - wallet.last_balance_refresh_at).total_seconds()
+    return age >= ttl
+
+
+def refresh_wallet_balances(wallet: WalletProfile, *, force: bool = False) -> list[BalanceSnapshot]:
+    if not force and not should_refresh_wallet_balances(wallet):
+        return get_cached_wallet_balances(wallet)
+
     etherlink = EtherlinkService()
     try:
         asset_balances = etherlink.get_supported_asset_balances(wallet.address)
@@ -111,8 +132,7 @@ def refresh_wallet_balances(wallet: WalletProfile) -> list[BalanceSnapshot]:
             settings.BLOCKCHAIN_NETWORK,
             exc_info=True,
         )
-        existing = get_latest_balance_snapshots(wallet)
-        return existing or ensure_default_balance_snapshots(wallet)
+        return get_cached_wallet_balances(wallet)
     if not asset_balances:
         logger.warning(
             "wallets.balance_refresh_empty wallet_id=%s address=%s network_key=%s",
@@ -120,10 +140,11 @@ def refresh_wallet_balances(wallet: WalletProfile) -> list[BalanceSnapshot]:
             wallet.address,
             settings.BLOCKCHAIN_NETWORK,
         )
-        existing = get_latest_balance_snapshots(wallet)
-        return existing or ensure_default_balance_snapshots(wallet)
+        return get_cached_wallet_balances(wallet)
 
     snapshots = _persist_asset_balances(wallet, asset_balances)
+    wallet.last_balance_refresh_at = timezone.now()
+    wallet.save(update_fields=["last_balance_refresh_at", "updated_at"])
     logger.info(
         "wallets.balance_refresh_success wallet_id=%s address=%s asset_count=%s network_key=%s asset_registry=%s",
         wallet.id,
@@ -133,6 +154,34 @@ def refresh_wallet_balances(wallet: WalletProfile) -> list[BalanceSnapshot]:
         settings.BLOCKCHAIN_ASSET_REGISTRY_KEY,
     )
     return snapshots
+
+
+def schedule_wallet_balance_refresh(wallet: WalletProfile) -> bool:
+    if not should_refresh_wallet_balances(wallet):
+        return False
+
+    with _refresh_lock:
+        if wallet.id in _refresh_in_flight:
+            logger.info(
+                "wallets.balance_refresh_skipped wallet_id=%s reason=in_flight",
+                wallet.id,
+            )
+            return False
+        _refresh_in_flight.add(wallet.id)
+
+    thread = threading.Thread(
+        target=_run_background_balance_refresh,
+        args=(wallet.id,),
+        daemon=True,
+        name=f"wallet-refresh-{wallet.id}",
+    )
+    thread.start()
+    logger.info(
+        "wallets.balance_refresh_scheduled wallet_id=%s ttl_seconds=%s",
+        wallet.id,
+        settings.BALANCE_REFRESH_TTL_SECONDS,
+    )
+    return True
 
 
 def ensure_default_balance_snapshots(wallet: WalletProfile) -> list[BalanceSnapshot]:
@@ -242,3 +291,18 @@ def _persist_asset_balances(
             )
         )
     return sorted(snapshots, key=lambda balance: balance.asset_symbol)
+
+
+def _run_background_balance_refresh(wallet_id: int) -> None:
+    close_old_connections()
+    try:
+        wallet = WalletProfile.objects.get(id=wallet_id)
+        refresh_wallet_balances(wallet, force=True)
+    except WalletProfile.DoesNotExist:
+        logger.warning("wallets.balance_refresh_background_missing wallet_id=%s", wallet_id)
+    except Exception:
+        logger.exception("wallets.balance_refresh_background_failed wallet_id=%s", wallet_id)
+    finally:
+        with _refresh_lock:
+            _refresh_in_flight.discard(wallet_id)
+        close_old_connections()

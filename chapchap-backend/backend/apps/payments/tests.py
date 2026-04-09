@@ -12,7 +12,7 @@ from cryptography.fernet import Fernet
 from apps.ai_agent.models import ParsedIntent, PromptRequest
 from apps.blockchain.services import BlockchainSubmissionError, NativeTransferSubmission
 
-from .models import PaymentIntent
+from .models import PaymentIntent, TransactionHistory
 from .services import build_payment_intent_from_parsed_intent
 
 
@@ -36,6 +36,7 @@ class PaymentSubmissionViewTests(APITestCase):
         amount: str = "0.10",
         recipient_name: str = "Ada",
         recipient_address: str | None = None,
+        scheduled_for: str | None = None,
     ) -> PaymentIntent:
         prompt_request = PromptRequest.objects.create(
             user=self.user,
@@ -50,11 +51,32 @@ class PaymentSubmissionViewTests(APITestCase):
                 "recipient_name": recipient_name,
                 "recipient_address": recipient_address,
                 "amount": amount,
+                "scheduled_for": scheduled_for,
             },
             confidence=0.98,
             missing_fields=[] if recipient_address else ["recipient_address"],
         )
         return build_payment_intent_from_parsed_intent(parsed_intent)
+
+    def test_submit_scheduled_payment_marks_as_scheduled(self) -> None:
+        scheduled_for = (timezone.now() + timezone.timedelta(minutes=5)).isoformat()
+        payment_intent = self._create_payment_intent(
+            recipient_address=self.valid_address,
+            scheduled_for=scheduled_for,
+        )
+
+        response = self.client.post(f"/api/payments/{payment_intent.id}/submit/", {}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], PaymentIntent.STATUS_SCHEDULED)
+        payment_intent.refresh_from_db()
+        self.assertEqual(payment_intent.status, PaymentIntent.STATUS_SCHEDULED)
+        self.assertTrue(
+            TransactionHistory.objects.filter(
+                payment_intent=payment_intent,
+                status=TransactionHistory.STATUS_SCHEDULED,
+            ).exists()
+        )
 
     @patch("apps.payments.services.get_wallet_private_key")
     @patch("apps.payments.services.EtherlinkService.submit_native_transfer")

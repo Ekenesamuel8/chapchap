@@ -169,6 +169,9 @@ class AgentExecuteView(APIView):
                     "estimated_gas_xtz": gas_summary["estimated_gas_xtz"],
                     "note": payment_intent.note,
                     "schedule_in_minutes": payment_intent.schedule_in_minutes,
+                    "scheduled_for": payment_intent.scheduled_for.isoformat()
+                    if payment_intent.scheduled_for
+                    else None,
                     "explorer_base_url": gas_summary["explorer_base_url"],
                 },
             },

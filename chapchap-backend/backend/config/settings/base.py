@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import dj_database_url
 from dotenv import load_dotenv
@@ -21,6 +22,23 @@ def _get_list(name: str, default: list[str] | None = None) -> list[str]:
     if not value:
         return default or []
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _describe_database_url(database_url: str | None) -> dict[str, str]:
+    if not database_url:
+        return {"host": "unset", "kind": "unset"}
+    parsed = urlparse(database_url)
+    host = parsed.hostname or "unknown"
+    lowered = host.lower()
+    if host in {"localhost", "127.0.0.1"}:
+        kind = "local"
+    elif "render.com" in lowered and lowered.endswith("-internal"):
+        kind = "render_internal"
+    elif "render.com" in lowered:
+        kind = "render_external"
+    else:
+        kind = "external_or_custom"
+    return {"host": host, "kind": kind}
 
 
 SECRET_KEY = os.environ.get(
@@ -106,6 +124,7 @@ DATABASES = {
         conn_max_age=600,
     )
 }
+DATABASE_URL_DETAILS = _describe_database_url(os.getenv("DATABASE_URL"))
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -140,6 +159,7 @@ GOOGLE_OAUTH_VERIFY_AUDIENCE = _get_bool(
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
 WALLET_ENCRYPTION_KEY = os.environ.get("WALLET_ENCRYPTION_KEY", "")
+BALANCE_REFRESH_TTL_SECONDS = int(os.environ.get("BALANCE_REFRESH_TTL_SECONDS", "20"))
 BLOCKCHAIN_NETWORK = (
     os.environ.get("BLOCKCHAIN_NETWORK")
     or os.environ.get("BLOCKCHAIN_MODE")
@@ -301,6 +321,11 @@ LOGGING = {
             "propagate": False,
         },
         "apps.wallets": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "apps.audit": {
             "handlers": ["console"],
             "level": "INFO",
             "propagate": False,

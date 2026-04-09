@@ -5,10 +5,12 @@ import logging
 import re
 from urllib.parse import quote_plus
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
 from django.db import DatabaseError, transaction
+from django.utils import timezone
 from google.genai import types
 from pydantic import ValidationError
 
@@ -17,6 +19,8 @@ from apps.payments.models import PaymentIntent
 from apps.payments.services import (
     PaymentIntentCreationError,
     build_payment_intent_from_parsed_intent,
+    create_gift_card_request,
+    create_savings_position,
 )
 from apps.wallets.services import (
     ensure_default_balance_snapshots,
@@ -50,6 +54,8 @@ IntentKind = Literal[
     "swap",
     "investment_advice",
     "portfolio_analysis",
+    "save",
+    "gift_card",
     "unknown",
 ]
 
@@ -133,6 +139,8 @@ PRODUCT_KEYWORDS = (
     "groceries",
     "restaurant",
 )
+SAVE_KEYWORDS = ("save", "lock", "earn", "deposit for yield", "yield")
+GIFT_CARD_KEYWORDS = ("gift card", "airtime", "top up", "topup", "bitrefill", "amazon card", "netflix card")
 STOP_WORDS = {
     "buy",
     "find",
@@ -172,6 +180,8 @@ INVALID_RECIPIENT_WORDS = {
     "tomorrow",
     "today",
     "please",
+    "in",
+    "on",
 }
 PRODUCT_SESSION_HINTS = {"under", "below", "less than", "budget", "$", "used", "new", "refurbished"}
 SWAP_KEYWORDS = ("swap", "convert", "exchange", "trade")
@@ -200,6 +210,18 @@ class SwapContext:
     source_token: str | None
     destination_token: str | None
     amount: str | None
+
+
+@dataclass
+class SavingsContext:
+    asset: str | None
+    amount: str | None
+
+
+@dataclass
+class GiftCardContext:
+    brand: str | None
+    query: str
 
 
 class AgentChatError(Exception):
@@ -359,6 +381,18 @@ class AgentConversationService:
 
         if classifier == "portfolio_analysis":
             return self._handle_portfolio_analysis_message(prompt_request=prompt_request)
+
+        if classifier == "save":
+            return self._handle_savings_message(
+                prompt_request=prompt_request,
+                savings_context=_extract_savings_fields(message),
+            )
+
+        if classifier == "gift_card":
+            return self._handle_gift_card_message(
+                prompt_request=prompt_request,
+                gift_context=_extract_gift_card_context(message),
+            )
 
         provider_result = self._try_provider_parse(message)
         if provider_result is None:
@@ -591,6 +625,80 @@ class AgentConversationService:
                 "type": "assistant_message",
                 "message": advice,
                 "intent": "portfolio_analysis",
+            }
+        )
+
+    def _handle_savings_message(
+        self,
+        *,
+        prompt_request: PromptRequest,
+        savings_context: SavingsContext,
+    ) -> ChatResponseData:
+        if not savings_context.amount or not savings_context.asset:
+            return ChatResponseData(
+                payload={
+                    "type": "assistant_followup",
+                    "message": "How much would you like to save, and which asset should I use?",
+                    "intent": "save",
+                }
+            )
+
+        amount = _parse_decimal(savings_context.amount)
+        if amount is None:
+            return ChatResponseData(
+                payload={
+                    "type": "assistant_followup",
+                    "message": "I need a valid amount before I can prepare a savings position.",
+                    "intent": "save",
+                }
+            )
+
+        position = create_savings_position(
+            user=prompt_request.user,
+            asset=savings_context.asset,
+            amount=amount,
+        )
+        return ChatResponseData(
+            payload={
+                "type": "savings_result",
+                "message": (
+                    f"I've placed {position.amount} {position.asset} into {position.strategy_name}. "
+                    "This is demo mode for now."
+                ),
+                "intent": "save",
+                "savings": {
+                    "id": position.id,
+                    "asset": position.asset,
+                    "amount": f"{position.amount}",
+                    "strategy_name": position.strategy_name,
+                    "strategy_type": position.strategy_type,
+                    "apy_estimate": f"{position.apy_estimate}",
+                    "mode": position.mode,
+                    "status": position.status,
+                },
+            }
+        )
+
+    def _handle_gift_card_message(
+        self,
+        *,
+        prompt_request: PromptRequest,
+        gift_context: GiftCardContext,
+    ) -> ChatResponseData:
+        brand = gift_context.brand or "Gift card"
+        results = _build_gift_card_results(gift_context)
+        create_gift_card_request(
+            user=prompt_request.user,
+            brand=brand,
+            query=gift_context.query,
+            result_count=len(results),
+        )
+        return ChatResponseData(
+            payload={
+                "type": "giftcard_results",
+                "message": "Here are a few gift card options you can continue with.",
+                "intent": "gift_card",
+                "results": results,
             }
         )
 
@@ -1259,6 +1367,10 @@ def _classify_message(message: str) -> IntentKind:
         return "greeting"
     if _matches_phrase_set(lowered, APPRECIATION_PATTERNS):
         return "small_talk"
+    if any(keyword in lowered for keyword in GIFT_CARD_KEYWORDS):
+        return "gift_card"
+    if any(keyword in lowered for keyword in SAVE_KEYWORDS):
+        return "save"
     if any(keyword in lowered for keyword in PORTFOLIO_KEYWORDS):
         return "portfolio_analysis"
     if any(keyword in lowered for keyword in INVESTMENT_KEYWORDS):
@@ -1329,9 +1441,11 @@ def _extract_payment_fields(message: str) -> dict[str, Any]:
     if recipient_name:
         extracted["recipient_name"] = recipient_name
 
-    schedule = _extract_schedule_in_minutes(message)
-    if schedule is not None:
-        extracted["schedule_in_minutes"] = schedule
+    schedule = _extract_schedule_details(message)
+    if schedule["schedule_in_minutes"] is not None:
+        extracted["schedule_in_minutes"] = schedule["schedule_in_minutes"]
+    if schedule["scheduled_for"] is not None:
+        extracted["scheduled_for"] = schedule["scheduled_for"]
 
     token_match = re.search(r"\b(USDC|XTZ|TEZ)\b", message, flags=re.IGNORECASE)
     if token_match:
@@ -1376,6 +1490,59 @@ def _extract_schedule_in_minutes(message: str) -> int | None:
     if "tomorrow morning" in message.lower():
         return 24 * 60
     return None
+
+
+def _extract_schedule_details(message: str) -> dict[str, Any]:
+    lowered = message.lower()
+    now = timezone.now()
+    quick_match = re.search(r"\bin\s+(\d+)\s*(seconds?|mins?|minutes?|hours?)\b", lowered, re.IGNORECASE)
+    if quick_match:
+        value = int(quick_match.group(1))
+        unit = quick_match.group(2).lower()
+        seconds = value
+        minutes = value
+        if unit.startswith("hour"):
+            seconds = value * 3600
+            minutes = value * 60
+        elif unit.startswith("sec"):
+            seconds = value
+            minutes = max(1, value // 60) if value >= 60 else 0
+        else:
+            seconds = value * 60
+            minutes = value
+        scheduled_for = now + timedelta(seconds=seconds)
+        return {"schedule_in_minutes": minutes, "scheduled_for": scheduled_for.isoformat()}
+
+    date_match = re.search(r"\bon\s+(\d{1,2})\s+([A-Za-z]+)\b", message, re.IGNORECASE)
+    if date_match:
+        day = int(date_match.group(1))
+        month_name = date_match.group(2).strip().lower()
+        month_map = {
+            "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+            "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+            "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9, "oct": 10,
+            "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
+        }
+        month = month_map.get(month_name)
+        if month:
+            year = now.year
+            try:
+                scheduled = now.replace(year=year, month=month, day=day, hour=9, minute=0, second=0, microsecond=0)
+            except ValueError:
+                return {"schedule_in_minutes": None, "scheduled_for": None}
+            if scheduled <= now:
+                try:
+                    scheduled = scheduled.replace(year=year + 1)
+                except ValueError:
+                    return {"schedule_in_minutes": None, "scheduled_for": None}
+            delta_minutes = int((scheduled - now).total_seconds() // 60)
+            return {"schedule_in_minutes": max(delta_minutes, 0), "scheduled_for": scheduled.isoformat()}
+
+    schedule_minutes = _extract_schedule_in_minutes(message)
+    if schedule_minutes is not None:
+        scheduled_for = now + timedelta(minutes=schedule_minutes)
+        return {"schedule_in_minutes": schedule_minutes, "scheduled_for": scheduled_for.isoformat()}
+    return {"schedule_in_minutes": None, "scheduled_for": None}
 
 
 def _extract_product_search(message: str) -> ProductSearchContext:
@@ -1461,6 +1628,9 @@ def _normalize_payment_payload(payload: dict[str, Any]) -> dict[str, Any]:
     schedule_in_minutes = _parse_schedule(payload.get("schedule_in_minutes"))
     if schedule_in_minutes is not None:
         normalized["schedule_in_minutes"] = schedule_in_minutes
+    scheduled_for = _clean_optional(payload.get("scheduled_for"))
+    if scheduled_for:
+        normalized["scheduled_for"] = scheduled_for
 
     if normalized.get("currency") == "USD" and not normalized.get("token_symbol"):
         normalized["token_symbol"] = "USDC"
@@ -1509,6 +1679,7 @@ def _serialize_payment_intent(payment_intent: PaymentIntent) -> dict[str, Any]:
             "estimated_gas_xtz": gas_summary["estimated_gas_xtz"],
             "note": payment_intent.note,
             "schedule_in_minutes": payment_intent.schedule_in_minutes,
+            "scheduled_for": payment_intent.scheduled_for.isoformat() if payment_intent.scheduled_for else None,
             "explorer_base_url": gas_summary["explorer_base_url"],
         },
     }
@@ -1841,6 +2012,50 @@ def _normalize_swap_token(value: str | None) -> str | None:
     return token if token in {"XTZ", "USDC"} else None
 
 
+def _extract_savings_fields(message: str) -> SavingsContext:
+    amount_match = re.search(r"(?<![a-fA-F0-9x])(\d+(?:\.\d{1,8})?)", message)
+    token_match = re.search(r"\b(XTZ|TEZ|USDC)\b", message, flags=re.IGNORECASE)
+    asset = _normalize_swap_token(token_match.group(1)) if token_match else None
+    return SavingsContext(
+        asset=asset,
+        amount=amount_match.group(1) if amount_match else None,
+    )
+
+
+def _extract_gift_card_context(message: str) -> GiftCardContext:
+    lowered = message.lower()
+    brand = None
+    for candidate in ("amazon", "netflix", "airtime", "apple", "google play"):
+        if candidate in lowered:
+            brand = candidate.title()
+            break
+    return GiftCardContext(brand=brand, query=message.strip())
+
+
+def _build_gift_card_results(context: GiftCardContext) -> list[dict[str, str]]:
+    brand = context.brand or "Gift Card"
+    return [
+        {
+            "brand": brand,
+            "title": f"{brand} Gift Card",
+            "denomination": "$10 - $100",
+            "country": "Global",
+            "availability": "Available now",
+            "cta_label": "Continue",
+            "mode": "demo",
+        },
+        {
+            "brand": brand,
+            "title": f"{brand} Digital Code",
+            "denomination": "$20 - $200",
+            "country": "Nigeria friendly",
+            "availability": "Available now",
+            "cta_label": "Continue",
+            "mode": "demo",
+        },
+    ]
+
+
 def _build_portfolio_context(address: str, balances: list[Any]) -> str:
     lines = [f"Wallet address: {address}"]
     total_usd = Decimal("0")
@@ -1889,6 +2104,8 @@ def _build_missing_field_message(missing_fields: list[str], payload: dict[str, A
             else "How much would you like to send?"
         )
     if "recipient_address" in missing_fields and recipient_name:
+        if payload.get("scheduled_for"):
+            return f"Please provide {recipient_name}'s wallet address so I can schedule the transfer."
         return f"Please provide {recipient_name}'s wallet address so I can prepare the onchain transfer."
     if "recipient_name" in missing_fields and amount:
         return f"Who would you like to send {amount} to?"
@@ -1906,6 +2123,8 @@ def _build_repeated_missing_field_message(missing_fields: list[str], payload: di
             else "I still need the amount before I can prepare this payment."
         )
     if "recipient_address" in missing_fields and recipient_name:
+        if payload.get("scheduled_for"):
+            return f"I still need {recipient_name}'s wallet address before I can schedule the transfer."
         return f"I still need {recipient_name}'s wallet address before I can prepare the onchain transfer."
     if "recipient_name" in missing_fields:
         return "I still need the recipient before I can prepare this payment."
@@ -1917,6 +2136,12 @@ def _build_ready_for_confirmation_message(payload: dict[str, Any]) -> str:
     token_symbol = _clean_optional(payload.get("token_symbol")) or "XTZ"
     recipient = _clean_optional(payload.get("recipient_name")) or _clean_optional(payload.get("recipient_address")) or "your recipient"
     schedule = payload.get("schedule_in_minutes")
+    scheduled_for = _clean_optional(payload.get("scheduled_for"))
+    if scheduled_for:
+        return (
+            f"Got it - I've prepared a {amount} {token_symbol} blockchain transfer to {recipient} "
+            f"for scheduling at {scheduled_for}."
+        )
     if isinstance(schedule, int):
         return (
             f"Got it - I've prepared a {amount} {token_symbol} blockchain transfer to {recipient} "

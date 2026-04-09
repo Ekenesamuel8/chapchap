@@ -13,6 +13,7 @@ class WalletProfile(models.Model):
     wallet_type = models.CharField(max_length=50, default="embedded")
     chain_name = models.CharField(max_length=100, default="etherlink_testnet")
     is_active = models.BooleanField(default=True)
+    last_balance_refresh_at = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

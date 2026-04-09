@@ -292,6 +292,39 @@ class AgentChatViewTests(APITestCase):
         self.assertEqual(payload["intent"], "swap")
         self.assertIn("how much", payload["message"].lower())
 
+    def test_scheduled_payment_prompt_returns_confirmation(self) -> None:
+        response = self.client.post(
+            "/api/agent/chat/",
+            {"message": f"send 0.02 xtz to {self.valid_address} in 5 minutes"},
+            format="json",
+        )
+
+        payload = response.json()
+        self.assertEqual(payload["type"], "payment_confirmation")
+        self.assertTrue(payload["payment"]["summary"]["scheduled_for"])
+
+    def test_save_prompt_returns_savings_result(self) -> None:
+        response = self.client.post(
+            "/api/agent/chat/",
+            {"message": "save 0.01 xtz for me"},
+            format="json",
+        )
+
+        payload = response.json()
+        self.assertEqual(payload["type"], "savings_result")
+        self.assertEqual(payload["intent"], "save")
+
+    def test_gift_card_prompt_returns_results(self) -> None:
+        response = self.client.post(
+            "/api/agent/chat/",
+            {"message": "buy amazon gift card"},
+            format="json",
+        )
+
+        payload = response.json()
+        self.assertEqual(payload["type"], "giftcard_results")
+        self.assertTrue(payload["results"])
+
     @patch("apps.ai_agent.chat_services.GeminiIntentParserService.parse_prompt")
     def test_provider_quota_exhausted_on_unknown_prompt_degrades_gracefully(
         self,
