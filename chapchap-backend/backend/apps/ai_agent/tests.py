@@ -3,8 +3,10 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
+from cryptography.fernet import Fernet
 
 from apps.ai_agent.models import PendingIntentSession
 from apps.ai_agent.schemas import ParsedIntentSchema
@@ -12,6 +14,7 @@ from apps.ai_agent.services import GeminiQuotaExceededError
 from apps.payments.models import PaymentIntent
 
 
+@override_settings(WALLET_ENCRYPTION_KEY=Fernet.generate_key().decode("utf-8"))
 class AgentChatViewTests(APITestCase):
     def setUp(self) -> None:
         user_model = get_user_model()
@@ -150,6 +153,38 @@ class AgentChatViewTests(APITestCase):
         self.assertEqual(payload["type"], "assistant_followup")
         self.assertEqual(payload["intent"], "product_search")
 
+    @patch("apps.ai_agent.chat_services.GeminiAdviceService.generate_response")
+    def test_investment_prompt_returns_real_advice_response(self, mock_generate_response) -> None:
+        mock_generate_response.return_value = (
+            "Start with your goals and risk tolerance, then diversify gradually."
+        )
+
+        response = self.client.post(
+            "/api/agent/chat/",
+            {"message": "How do I invest?"},
+            format="json",
+        )
+
+        payload = response.json()
+        self.assertEqual(payload["type"], "assistant_message")
+        self.assertIn("risk tolerance", payload["message"])
+
+    @patch("apps.ai_agent.chat_services.GeminiAdviceService.generate_response")
+    def test_portfolio_prompt_returns_balance_aware_response(self, mock_generate_response) -> None:
+        mock_generate_response.return_value = (
+            "Your current wallet looks concentrated, so think about diversification."
+        )
+
+        response = self.client.post(
+            "/api/agent/chat/",
+            {"message": "Analyze my portfolio and suggest investment"},
+            format="json",
+        )
+
+        payload = response.json()
+        self.assertEqual(payload["type"], "assistant_message")
+        self.assertIn("diversification", payload["message"])
+
     def test_product_search_can_collect_budget_then_return_results(self) -> None:
         response = self.client.post(
             "/api/agent/chat/",
@@ -230,6 +265,32 @@ class AgentChatViewTests(APITestCase):
         payload = response.json()
         self.assertIn(payload["type"], {"assistant_followup", "product_results"})
         self.assertEqual(payload["intent"], "product_search")
+
+    def test_swap_prompt_returns_swap_preview_without_wallet_address(self) -> None:
+        response = self.client.post(
+            "/api/agent/chat/",
+            {"message": "swap 0.1 xtz to usdc"},
+            format="json",
+        )
+
+        payload = response.json()
+        self.assertEqual(payload["type"], "swap_preview")
+        self.assertEqual(payload["intent"], "swap")
+        self.assertEqual(payload["swap"]["source_token"], "XTZ")
+        self.assertEqual(payload["swap"]["destination_token"], "USDC")
+        self.assertNotIn("wallet address", payload["message"].lower())
+
+    def test_swap_prompt_missing_amount_asks_swap_specific_follow_up(self) -> None:
+        response = self.client.post(
+            "/api/agent/chat/",
+            {"message": "Swap XTZ to USDC"},
+            format="json",
+        )
+
+        payload = response.json()
+        self.assertEqual(payload["type"], "assistant_followup")
+        self.assertEqual(payload["intent"], "swap")
+        self.assertIn("how much", payload["message"].lower())
 
     @patch("apps.ai_agent.chat_services.GeminiIntentParserService.parse_prompt")
     def test_provider_quota_exhausted_on_unknown_prompt_degrades_gracefully(

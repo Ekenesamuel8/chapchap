@@ -281,17 +281,13 @@ class EtherlinkService:
         *,
         recipient_address: str,
         amount: Decimal,
+        sender_private_key: str,
+        sender_address: str | None = None,
     ) -> NativeTransferSubmission:
-        if settings.BLOCKCHAIN_NETWORK != "etherlink_testnet":
-            raise BlockchainSubmissionError(
-                "Real submission is only enabled for Etherlink testnet demo mode.",
-                code="network_not_supported",
-            )
         web3 = self._require_web3()
-        private_key = settings.BLOCKCHAIN_SENDER_PRIVATE_KEY
-        if not private_key:
+        if not sender_private_key:
             raise BlockchainSubmissionError(
-                "Demo sender private key is not configured.",
+                "Sender private key is not configured.",
                 code="missing_sender_key",
             )
         if not Web3.is_address(recipient_address):
@@ -300,23 +296,22 @@ class EtherlinkService:
                 code="invalid_recipient_address",
             )
 
-        account = Account.from_key(private_key)
-        sender_address = account.address
-        configured_sender = settings.BLOCKCHAIN_SENDER_ADDRESS
-        if configured_sender and configured_sender.lower() != sender_address.lower():
+        account = Account.from_key(sender_private_key)
+        derived_sender_address = account.address
+        if sender_address and sender_address.lower() != derived_sender_address.lower():
             raise BlockchainSubmissionError(
-                "Configured sender address does not match the demo private key.",
+                "Sender wallet address does not match the configured private key.",
                 code="sender_mismatch",
             )
 
-        checksum_sender = web3.to_checksum_address(sender_address)
+        checksum_sender = web3.to_checksum_address(derived_sender_address)
         checksum_recipient = web3.to_checksum_address(recipient_address)
         value = Web3.to_wei(amount, "ether")
 
         logger.info(
             "blockchain.transfer_build_start network_key=%s sender=%s recipient=%s amount=%s",
             settings.BLOCKCHAIN_NETWORK,
-            sender_address,
+            derived_sender_address,
             recipient_address,
             amount,
         )
@@ -335,7 +330,7 @@ class EtherlinkService:
             logger.warning(
                 "blockchain.transfer_build_failed network_key=%s sender=%s recipient=%s",
                 settings.BLOCKCHAIN_NETWORK,
-                sender_address,
+                derived_sender_address,
                 recipient_address,
                 exc_info=True,
             )
@@ -369,7 +364,7 @@ class EtherlinkService:
             logger.warning(
                 "blockchain.transfer_submit_failed network_key=%s sender=%s recipient=%s",
                 settings.BLOCKCHAIN_NETWORK,
-                sender_address,
+                derived_sender_address,
                 recipient_address,
                 exc_info=True,
             )
@@ -382,14 +377,14 @@ class EtherlinkService:
         logger.info(
             "blockchain.transfer_submit_success network_key=%s sender=%s recipient=%s tx_hash=%s",
             settings.BLOCKCHAIN_NETWORK,
-            sender_address,
+            derived_sender_address,
             recipient_address,
             tx_hash,
         )
         return NativeTransferSubmission(
             tx_hash=tx_hash,
             explorer_url=explorer_url,
-            sender_address=sender_address,
+            sender_address=derived_sender_address,
             recipient_address=recipient_address,
         )
 

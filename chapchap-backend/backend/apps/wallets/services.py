@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import hashlib
 import logging
+import os
 from decimal import Decimal
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from eth_account import Account
 
 from apps.blockchain.services import (
     AssetBalance,
@@ -16,6 +17,12 @@ from apps.blockchain.services import (
     get_supported_assets,
 )
 
+from .encryption_utils import (
+    WalletDecryptionError,
+    WalletEncryptionConfigurationError,
+    decrypt_private_key,
+    encrypt_private_key,
+)
 from .models import BalanceSnapshot, WalletProfile
 
 logger = logging.getLogger(__name__)
@@ -34,26 +41,51 @@ DEFAULT_BALANCES: tuple[dict[str, Decimal | str | None], ...] = (
 )
 
 
-def generate_dev_wallet_address(user: User) -> str:
-    seed = f"{user.pk}:{user.email}".encode("utf-8")
-    digest = hashlib.sha256(seed).hexdigest()[:40]
-    return f"0x{digest}"
+class WalletProvisioningError(Exception):
+    """Raised when a custodial wallet cannot be provisioned or decrypted."""
 
 
 @transaction.atomic
 def ensure_wallet_profile(user: User) -> WalletProfile:
     wallet = WalletProfile.objects.filter(user=user).first()
     if wallet:
-        if wallet.chain_name != settings.BLOCKCHAIN_CHAIN_NAME:
-            wallet.chain_name = settings.BLOCKCHAIN_CHAIN_NAME
-            wallet.save(update_fields=["chain_name", "updated_at"])
-        return wallet
+        return _ensure_wallet_credentials(wallet)
 
-    return WalletProfile.objects.create(
+    private_key, address = generate_wallet_credentials()
+    encrypted_private_key = _encrypt_wallet_private_key(private_key)
+
+    wallet, _ = WalletProfile.objects.get_or_create(
         user=user,
-        address=generate_dev_wallet_address(user),
-        chain_name=settings.BLOCKCHAIN_CHAIN_NAME,
+        defaults={
+            "address": address,
+            "encrypted_private_key": encrypted_private_key,
+            "chain_name": settings.BLOCKCHAIN_CHAIN_NAME,
+        },
     )
+    return _ensure_wallet_credentials(wallet, private_key=private_key, address=address)
+
+
+def generate_wallet_credentials() -> tuple[str, str]:
+    account = Account.create(os.urandom(32))
+    private_key = account.key.hex()
+    if not private_key.startswith("0x"):
+        private_key = f"0x{private_key}"
+    return private_key, account.address
+
+
+def get_wallet_private_key(wallet: WalletProfile) -> str:
+    if not wallet.encrypted_private_key:
+        raise WalletProvisioningError("Wallet private key is not available.")
+    try:
+        return decrypt_private_key(wallet.encrypted_private_key)
+    except WalletDecryptionError as exc:
+        logger.error(
+            "wallets.private_key_decrypt_failed wallet_id=%s user_id=%s",
+            wallet.id,
+            wallet.user_id,
+            exc_info=True,
+        )
+        raise WalletProvisioningError("Wallet private key could not be decrypted.") from exc
 
 
 def get_latest_balance_snapshots(wallet: WalletProfile) -> list[BalanceSnapshot]:
@@ -152,6 +184,46 @@ def build_fund_wallet_options(wallet: WalletProfile) -> dict[str, object]:
 
 def shorten_wallet_address(address: str) -> str:
     return f"{address[:6]}...{address[-4:]}"
+
+
+def _ensure_wallet_credentials(
+    wallet: WalletProfile,
+    *,
+    private_key: str | None = None,
+    address: str | None = None,
+) -> WalletProfile:
+    updates: list[str] = []
+    if wallet.chain_name != settings.BLOCKCHAIN_CHAIN_NAME:
+        wallet.chain_name = settings.BLOCKCHAIN_CHAIN_NAME
+        updates.append("chain_name")
+
+    if wallet.encrypted_private_key:
+        if updates:
+            wallet.save(update_fields=[*updates, "updated_at"])
+        return wallet
+
+    generated_private_key = private_key
+    generated_address = address
+    if generated_private_key is None or generated_address is None:
+        generated_private_key, generated_address = generate_wallet_credentials()
+
+    wallet.encrypted_private_key = _encrypt_wallet_private_key(generated_private_key)
+    wallet.address = generated_address
+    updates.extend(["encrypted_private_key", "address"])
+    wallet.save(update_fields=[*updates, "updated_at"])
+    logger.warning(
+        "wallets.private_key_backfilled wallet_id=%s user_id=%s",
+        wallet.id,
+        wallet.user_id,
+    )
+    return wallet
+
+
+def _encrypt_wallet_private_key(private_key: str) -> str:
+    try:
+        return encrypt_private_key(private_key)
+    except WalletEncryptionConfigurationError as exc:
+        raise WalletProvisioningError("Wallet encryption is not configured.") from exc
 
 
 def _persist_asset_balances(

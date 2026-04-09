@@ -38,6 +38,8 @@ class PaymentIntentSubmitView(APIView):
             status_code = (
                 status.HTTP_422_UNPROCESSABLE_ENTITY
                 if exc.code in {"missing_recipient_address", "invalid_amount", "invalid_payment_status"}
+                else status.HTTP_503_SERVICE_UNAVAILABLE
+                if exc.code == "wallet_unavailable"
                 else status.HTTP_502_BAD_GATEWAY
             )
             return Response(

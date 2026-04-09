@@ -18,6 +18,11 @@ from apps.payments.services import (
     PaymentIntentCreationError,
     build_payment_intent_from_parsed_intent,
 )
+from apps.wallets.services import (
+    ensure_default_balance_snapshots,
+    ensure_wallet_profile,
+    refresh_wallet_balances,
+)
 
 from .models import ParsedIntent, PendingIntentSession, PromptRequest
 from .schemas import (
@@ -26,6 +31,7 @@ from .schemas import (
     PaymentConversationReplySchema,
 )
 from .services import (
+    GeminiAdviceService,
     GeminiConfigurationError,
     GeminiIntentParserService,
     GeminiQuotaExceededError,
@@ -36,10 +42,19 @@ from .services import (
 
 logger = logging.getLogger(__name__)
 
-IntentKind = Literal["greeting", "small_talk", "payment", "product_search", "unknown"]
+IntentKind = Literal[
+    "greeting",
+    "small_talk",
+    "payment",
+    "product_search",
+    "swap",
+    "investment_advice",
+    "portfolio_analysis",
+    "unknown",
+]
 
 DEFAULT_GREETING_MESSAGE = (
-    "Hey - I can help you send money, fund your wallet, or find products. "
+    "Hey - I can help you send money, swap assets, fund your wallet, or find products. "
     "What would you like to do?"
 )
 DEFAULT_SYSTEM_ERROR_MESSAGE = (
@@ -159,6 +174,10 @@ INVALID_RECIPIENT_WORDS = {
     "please",
 }
 PRODUCT_SESSION_HINTS = {"under", "below", "less than", "budget", "$", "used", "new", "refurbished"}
+SWAP_KEYWORDS = ("swap", "convert", "exchange", "trade")
+INVESTMENT_KEYWORDS = ("invest", "investment", "grow my money")
+PORTFOLIO_KEYWORDS = ("portfolio", "analyze my portfolio", "suggest investment")
+SUPPORTED_SWAP_TOKENS = {"XTZ", "USDC", "TEZ"}
 
 
 @dataclass
@@ -174,6 +193,13 @@ class ProductSearchContext:
     condition: str | None
     cheap_preference: bool
     food_intent: bool
+
+
+@dataclass
+class SwapContext:
+    source_token: str | None
+    destination_token: str | None
+    amount: str | None
 
 
 class AgentChatError(Exception):
@@ -237,6 +263,11 @@ class AgentConversationService:
                 )
                 if active_session.intent_type == PendingIntentSession.INTENT_PAYMENT:
                     response = self._handle_existing_payment_session(
+                        prompt_request=prompt_request,
+                        session=active_session,
+                    )
+                elif active_session.intent_type == PendingIntentSession.INTENT_SWAP:
+                    response = self._handle_existing_swap_session(
                         prompt_request=prompt_request,
                         session=active_session,
                     )
@@ -311,11 +342,23 @@ class AgentConversationService:
                 used_provider=False,
             )
 
+        if classifier == "swap":
+            return self._handle_swap_message(
+                prompt_request=prompt_request,
+                swap_context=_extract_swap_fields(message),
+            )
+
         if classifier == "product_search":
             return self._handle_product_message(
                 prompt_request=prompt_request,
                 product_context=_extract_product_search(message),
             )
+
+        if classifier == "investment_advice":
+            return self._handle_investment_advice_message(prompt_request=prompt_request)
+
+        if classifier == "portfolio_analysis":
+            return self._handle_portfolio_analysis_message(prompt_request=prompt_request)
 
         provider_result = self._try_provider_parse(message)
         if provider_result is None:
@@ -349,6 +392,11 @@ class AgentConversationService:
             return self._handle_product_message(
                 prompt_request=prompt_request,
                 product_context=fallback_product,
+            )
+        if parsed.intent == "swap":
+            return self._handle_swap_message(
+                prompt_request=prompt_request,
+                swap_context=_extract_swap_fields(message),
             )
 
         return ChatResponseData(payload=_assistant_message_payload(DEFAULT_GREETING_MESSAGE))
@@ -457,6 +505,157 @@ class AgentConversationService:
                 "query": _build_product_search_query(product_context),
                 "session": _serialize_session(session),
                 "results": results,
+            }
+        )
+
+    def _handle_swap_message(
+        self,
+        *,
+        prompt_request: PromptRequest,
+        swap_context: SwapContext,
+    ) -> ChatResponseData:
+        missing_fields = _determine_swap_missing_fields(swap_context)
+        payload = _swap_context_to_payload(swap_context)
+        status = (
+            PendingIntentSession.STATUS_COLLECTING
+            if missing_fields
+            else PendingIntentSession.STATUS_READY_FOR_CONFIRMATION
+        )
+
+        try:
+            session = self._replace_active_session(
+                user=prompt_request.user,
+                prompt_request=prompt_request,
+                intent_type=PendingIntentSession.INTENT_SWAP,
+                collected_data=payload,
+                missing_fields=missing_fields,
+                status=status,
+            )
+        except DatabaseError as exc:
+            raise AgentChatError("session_merge_failed", DEFAULT_SYSTEM_ERROR_MESSAGE, cause=exc) from exc
+
+        if missing_fields:
+            return ChatResponseData(
+                payload={
+                    "type": "assistant_followup",
+                    "message": _build_swap_followup_message(swap_context, missing_fields),
+                    "intent": "swap",
+                    "session": _serialize_session(session),
+                }
+            )
+
+        return ChatResponseData(
+            payload={
+                "type": "swap_preview",
+                "message": _build_swap_ready_message(swap_context),
+                "intent": "swap",
+                "session": _serialize_session(session),
+                "swap": _serialize_swap_preview(swap_context),
+            }
+        )
+
+    def _handle_investment_advice_message(
+        self,
+        *,
+        prompt_request: PromptRequest,
+    ) -> ChatResponseData:
+        advice = self._generate_investment_advice(
+            prompt=prompt_request.raw_prompt,
+            portfolio_context=None,
+        )
+        return ChatResponseData(
+            payload={
+                "type": "assistant_message",
+                "message": advice,
+                "intent": "investment_advice",
+            }
+        )
+
+    def _handle_portfolio_analysis_message(
+        self,
+        *,
+        prompt_request: PromptRequest,
+    ) -> ChatResponseData:
+        wallet = ensure_wallet_profile(prompt_request.user)
+        balances = refresh_wallet_balances(wallet)
+        if not balances:
+            balances = ensure_default_balance_snapshots(wallet)
+
+        portfolio_context = _build_portfolio_context(wallet.address, balances)
+        advice = self._generate_investment_advice(
+            prompt=prompt_request.raw_prompt,
+            portfolio_context=portfolio_context,
+        )
+        return ChatResponseData(
+            payload={
+                "type": "assistant_message",
+                "message": advice,
+                "intent": "portfolio_analysis",
+            }
+        )
+
+    def _handle_existing_swap_session(
+        self,
+        *,
+        prompt_request: PromptRequest,
+        session: PendingIntentSession,
+    ) -> ChatResponseData:
+        message = prompt_request.raw_prompt
+        classifier = _classify_message(message)
+        if classifier == "greeting":
+            return ChatResponseData(payload=_assistant_message_payload(_choose_greeting(message)))
+        if classifier == "small_talk":
+            return ChatResponseData(payload=_assistant_message_payload(_choose_small_talk_reply(message)))
+
+        current = _payload_to_swap_context(session.collected_data_json)
+        updates = _extract_swap_follow_up_fields(message, current)
+        merged = _merge_swap_context(current, updates)
+        missing_fields = _determine_swap_missing_fields(merged)
+
+        logger.info(
+            "agent.chat.swap_merge.result user_id=%s session_id=%s before=%s after=%s missing=%s",
+            prompt_request.user_id,
+            session.id,
+            session.collected_data_json,
+            _swap_context_to_payload(merged),
+            missing_fields,
+        )
+
+        session.collected_data_json = _swap_context_to_payload(merged)
+        session.missing_fields_json = missing_fields
+        session.last_prompt_request = prompt_request
+        session.status = (
+            PendingIntentSession.STATUS_COLLECTING
+            if missing_fields
+            else PendingIntentSession.STATUS_READY_FOR_CONFIRMATION
+        )
+        session.save(
+            update_fields=[
+                "collected_data_json",
+                "missing_fields_json",
+                "last_prompt_request",
+                "status",
+                "updated_at",
+            ]
+        )
+
+        if missing_fields:
+            return ChatResponseData(
+                payload={
+                    "type": "assistant_followup",
+                    "message": _build_swap_followup_message(merged, missing_fields),
+                    "intent": "swap",
+                    "session": _serialize_session(session),
+                }
+            )
+
+        return ChatResponseData(
+            payload={
+                "type": "swap_preview",
+                "message": _build_swap_ready_message(merged),
+                "intent": "swap",
+                "session": _serialize_session(session),
+                "swap": _serialize_swap_preview(merged),
             }
         )
 
@@ -837,6 +1036,7 @@ class AgentConversationService:
                 intent_type__in=[
                     PendingIntentSession.INTENT_PAYMENT,
                     PendingIntentSession.INTENT_PRODUCT_SEARCH,
+                    PendingIntentSession.INTENT_SWAP,
                 ],
                 status__in=[
                     PendingIntentSession.STATUS_COLLECTING,
@@ -926,6 +1126,13 @@ class AgentConversationService:
                 return not self._is_product_continuation(message, session)
             return True
 
+        if session.intent_type == PendingIntentSession.INTENT_SWAP:
+            if new_intent == "swap":
+                return False
+            if new_intent == "unknown":
+                return not self._is_swap_continuation(message, session)
+            return True
+
         return False
 
     def _is_payment_continuation(self, message: str, session: PendingIntentSession) -> bool:
@@ -941,6 +1148,34 @@ class AgentConversationService:
         if session.status == PendingIntentSession.STATUS_COLLECTING and _looks_like_product_follow_up(message):
             return True
         return False
+
+    def _is_swap_continuation(self, message: str, session: PendingIntentSession) -> bool:
+        if session.status == PendingIntentSession.STATUS_READY_FOR_CONFIRMATION:
+            return _matches_phrase_set(message.lower().strip(), SHORT_CONTINUE_PATTERNS)
+        current = _payload_to_swap_context(session.collected_data_json)
+        updates = _extract_swap_follow_up_fields(message, current)
+        return any(value is not None for value in updates.__dict__.values())
+
+    def _generate_investment_advice(
+        self,
+        *,
+        prompt: str,
+        portfolio_context: str | None,
+    ) -> str:
+        try:
+            service = GeminiAdviceService()
+            return service.generate_response(prompt, context=portfolio_context)
+        except GeminiConfigurationError:
+            logger.warning("agent.chat.advice_provider_unconfigured")
+        except GeminiQuotaExceededError:
+            logger.warning("agent.chat.advice_provider_quota_exhausted")
+        except GeminiTimeoutError:
+            logger.warning("agent.chat.advice_provider_timeout")
+        except GeminiRequestError:
+            logger.warning("agent.chat.advice_provider_failure")
+        except GeminiResponseValidationError:
+            logger.warning("agent.chat.advice_invalid_ai_response")
+        return _build_fallback_investment_advice(prompt=prompt, portfolio_context=portfolio_context)
 
 
 class GeminiPaymentConversationService:
@@ -1024,6 +1259,12 @@ def _classify_message(message: str) -> IntentKind:
         return "greeting"
     if _matches_phrase_set(lowered, APPRECIATION_PATTERNS):
         return "small_talk"
+    if any(keyword in lowered for keyword in PORTFOLIO_KEYWORDS):
+        return "portfolio_analysis"
+    if any(keyword in lowered for keyword in INVESTMENT_KEYWORDS):
+        return "investment_advice"
+    if any(keyword in lowered for keyword in SWAP_KEYWORDS):
+        return "swap"
     if any(keyword in lowered for keyword in PRODUCT_KEYWORDS):
         return "product_search"
     if any(keyword in lowered for keyword in PAYMENT_KEYWORDS):
@@ -1456,6 +1697,186 @@ def _build_product_search_results(context: ProductSearchContext) -> list[dict[st
             "tag": "Budget marketplace",
         },
     ]
+
+
+def _extract_swap_fields(message: str) -> SwapContext:
+    lowered = message.lower()
+    amount_match = re.search(r"(?<![a-fA-F0-9x])(\d+(?:\.\d{1,8})?)", message)
+    amount = amount_match.group(1) if amount_match else None
+
+    token_matches = [
+        _normalize_swap_token(match)
+        for match in re.findall(r"\b(xtz|tez|usdc)\b", lowered, flags=re.IGNORECASE)
+    ]
+    token_matches = [token for token in token_matches if token]
+
+    source_token = token_matches[0] if token_matches else None
+    destination_token = token_matches[1] if len(token_matches) > 1 else None
+
+    pair_match = re.search(
+        r"\b(?:swap|convert|exchange|trade)\s+(?:\d+(?:\.\d{1,8})\s+)?([a-z]{2,10})\s+(?:to|for)\s+([a-z]{2,10})\b",
+        lowered,
+        flags=re.IGNORECASE,
+    )
+    if pair_match:
+        source_token = _normalize_swap_token(pair_match.group(1)) or source_token
+        destination_token = _normalize_swap_token(pair_match.group(2)) or destination_token
+
+    return SwapContext(
+        source_token=source_token,
+        destination_token=destination_token,
+        amount=amount,
+    )
+
+
+def _extract_swap_follow_up_fields(message: str, current: SwapContext) -> SwapContext:
+    extracted = _extract_swap_fields(message)
+    if any(value is not None for value in extracted.__dict__.values()):
+        return extracted
+
+    compact = message.strip()
+    if current.amount is None:
+        amount_match = re.match(r"^\$?(\d+(?:\.\d{1,8})?)$", compact)
+        if amount_match:
+            return SwapContext(
+                source_token=None,
+                destination_token=None,
+                amount=amount_match.group(1),
+            )
+
+    token = _normalize_swap_token(compact)
+    if token:
+        if current.source_token is None:
+            return SwapContext(source_token=token, destination_token=None, amount=None)
+        if current.destination_token is None:
+            return SwapContext(source_token=None, destination_token=token, amount=None)
+
+    return SwapContext(source_token=None, destination_token=None, amount=None)
+
+
+def _merge_swap_context(current: SwapContext, updates: SwapContext) -> SwapContext:
+    return SwapContext(
+        source_token=updates.source_token or current.source_token,
+        destination_token=updates.destination_token or current.destination_token,
+        amount=updates.amount or current.amount,
+    )
+
+
+def _swap_context_to_payload(context: SwapContext) -> dict[str, Any]:
+    return {
+        "source_token": context.source_token,
+        "destination_token": context.destination_token,
+        "amount": context.amount,
+    }
+
+
+def _payload_to_swap_context(payload: dict[str, Any]) -> SwapContext:
+    return SwapContext(
+        source_token=_normalize_swap_token(_clean_optional(payload.get("source_token"))),
+        destination_token=_normalize_swap_token(_clean_optional(payload.get("destination_token"))),
+        amount=_clean_optional(payload.get("amount")),
+    )
+
+
+def _determine_swap_missing_fields(context: SwapContext) -> list[str]:
+    missing: list[str] = []
+    if not context.amount:
+        missing.append("amount")
+    if not context.source_token:
+        missing.append("source_token")
+    if not context.destination_token:
+        missing.append("destination_token")
+    return missing
+
+
+def _build_swap_followup_message(context: SwapContext, missing_fields: list[str]) -> str:
+    if "amount" in missing_fields and context.source_token and context.destination_token:
+        return f"How much {context.source_token} would you like to swap to {context.destination_token}?"
+    if "source_token" in missing_fields and context.destination_token:
+        return f"Which asset would you like to swap into {context.destination_token}?"
+    if "destination_token" in missing_fields and context.source_token:
+        return f"Which asset would you like to receive for your {context.source_token} swap?"
+    if "amount" in missing_fields:
+        return "How much would you like to swap?"
+    if "source_token" in missing_fields or "destination_token" in missing_fields:
+        return "Which assets would you like to swap between?"
+    return "I need a bit more information before I can preview that swap."
+
+
+def _build_swap_ready_message(context: SwapContext) -> str:
+    amount = context.amount or "0"
+    source_token = context.source_token or "your asset"
+    destination_token = context.destination_token or "the destination asset"
+    return (
+        f"Got it - I've prepared a preview to swap {amount} {source_token} to "
+        f"{destination_token}. This is only a preview for now."
+    )
+
+
+def _serialize_swap_preview(context: SwapContext) -> dict[str, str]:
+    gas_summary = get_payment_gas_summary(token_symbol="XTZ")
+    amount_in = context.amount or "0"
+    source_token = context.source_token or "XTZ"
+    destination_token = context.destination_token or "USDC"
+    estimated_output = amount_in
+    if source_token == destination_token:
+        estimated_output = amount_in
+    return {
+        "amount_in": amount_in,
+        "source_token": source_token,
+        "destination_token": destination_token,
+        "estimated_output": estimated_output,
+        "network": gas_summary["network"],
+        "estimated_fee_xtz": gas_summary["estimated_gas_xtz"],
+        "slippage_note": "Execution is not wired yet. Review this preview before any future swap flow.",
+    }
+
+
+def _normalize_swap_token(value: str | None) -> str | None:
+    if not value:
+        return None
+    token = value.strip().upper()
+    if token == "TEZ":
+        token = "XTZ"
+    return token if token in {"XTZ", "USDC"} else None
+
+
+def _build_portfolio_context(address: str, balances: list[Any]) -> str:
+    lines = [f"Wallet address: {address}"]
+    total_usd = Decimal("0")
+    for balance in balances:
+        symbol = getattr(balance, "asset_symbol", "")
+        amount = getattr(balance, "balance", Decimal("0"))
+        balance_usd = getattr(balance, "balance_usd", Decimal("0"))
+        lines.append(f"- {symbol}: {amount}")
+        try:
+            total_usd += Decimal(str(balance_usd))
+        except (InvalidOperation, TypeError):
+            continue
+    lines.append(f"Portfolio USD total: {total_usd:.2f}")
+    return "\n".join(lines)
+
+
+def _build_fallback_investment_advice(*, prompt: str, portfolio_context: str | None) -> str:
+    lowered = prompt.lower()
+    if portfolio_context:
+        xtz_match = re.search(r"- XTZ: ([0-9.]+)", portfolio_context)
+        usdc_match = re.search(r"- USDC: ([0-9.]+)", portfolio_context)
+        xtz_balance = xtz_match.group(1) if xtz_match else "0"
+        usdc_balance = usdc_match.group(1) if usdc_match else "0"
+        return (
+            f"Your wallet currently holds about {xtz_balance} XTZ and {usdc_balance} USDC.\n\n"
+            "If most of your value is concentrated in one asset, think about diversification rather than chasing quick gains. "
+            "A simple beginner-friendly approach is to keep some stablecoin liquidity for flexibility and only size higher-risk positions conservatively.\n\n"
+            "If you want, I can next help you think through a cautious split between long-term holdings, stablecoin reserves, and smaller experimental positions."
+        )
+    if "invest" in lowered:
+        return (
+            "A good place to start is with your goals, time horizon, and risk tolerance.\n\n"
+            "For beginners, it usually helps to avoid going all-in on one coin. Think about diversification, keeping some liquidity, and sizing risky positions small enough that short-term volatility will not force bad decisions.\n\n"
+            "If you want, I can help you turn that into a simple beginner allocation plan."
+        )
+    return DEFAULT_GREETING_MESSAGE
 
 
 def _build_missing_field_message(missing_fields: list[str], payload: dict[str, Any]) -> str:

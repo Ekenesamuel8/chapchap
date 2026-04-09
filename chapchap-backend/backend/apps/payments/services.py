@@ -12,7 +12,11 @@ from apps.blockchain.services import (
     EtherlinkService,
     get_native_asset,
 )
-from apps.wallets.services import ensure_wallet_profile
+from apps.wallets.services import (
+    WalletProvisioningError,
+    ensure_wallet_profile,
+    get_wallet_private_key,
+)
 
 from .models import PaymentIntent
 
@@ -139,10 +143,21 @@ def submit_payment_intent(payment_intent: PaymentIntent) -> PaymentIntent:
             code="invalid_amount",
         )
 
+    wallet = ensure_wallet_profile(payment_intent.user)
+    try:
+        sender_private_key = get_wallet_private_key(wallet)
+    except WalletProvisioningError as exc:
+        raise PaymentIntentSubmissionError(
+            "Your wallet is unavailable right now.",
+            code="wallet_unavailable",
+        ) from exc
+
     try:
         submission = EtherlinkService().submit_native_transfer(
             recipient_address=recipient_address,
             amount=amount,
+            sender_private_key=sender_private_key,
+            sender_address=wallet.address,
         )
     except BlockchainSubmissionError as exc:
         payment_intent.status = PaymentIntent.STATUS_FAILED

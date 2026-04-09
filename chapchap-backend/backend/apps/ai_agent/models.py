@@ -71,9 +71,11 @@ class ParsedIntent(models.Model):
 class PendingIntentSession(models.Model):
     INTENT_PAYMENT = "payment"
     INTENT_PRODUCT_SEARCH = "product_search"
+    INTENT_SWAP = "swap"
     INTENT_CHOICES = [
         (INTENT_PAYMENT, "Payment"),
         (INTENT_PRODUCT_SEARCH, "Product search"),
+        (INTENT_SWAP, "Swap"),
     ]
 
     STATUS_COLLECTING = "collecting"

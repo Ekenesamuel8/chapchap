@@ -12,10 +12,9 @@ from .serializers import (
 )
 
 PROMPT_SUGGESTIONS = [
-    "How do I invest $100?",
+    "How do I invest?",
     "Analyze my portfolio and suggest investment",
-    "Purchase an iPhone",
-    "Swap 10 tezos to USDC",
+    "Swap XTZ to USDC",
 ]
 
 

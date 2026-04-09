@@ -16,6 +16,7 @@ class WalletProfileAdmin(admin.ModelAdmin):
     search_fields = ("user__email", "address")
     list_filter = ("wallet_type", "chain_name", "is_active")
     readonly_fields = ("created_at", "updated_at")
+    exclude = ("encrypted_private_key",)
 
 
 @admin.register(BalanceSnapshot)

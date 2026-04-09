@@ -9,6 +9,7 @@ class WalletProfile(models.Model):
         related_name="wallet_profile",
     )
     address = models.CharField(max_length=42, unique=True)
+    encrypted_private_key = models.TextField(blank=True, null=True)
     wallet_type = models.CharField(max_length=50, default="embedded")
     chain_name = models.CharField(max_length=100, default="etherlink_testnet")
     is_active = models.BooleanField(default=True)

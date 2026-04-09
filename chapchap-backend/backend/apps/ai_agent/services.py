@@ -145,3 +145,48 @@ class GeminiIntentParserService:
                 "Gemini returned malformed structured output."
             )
         return raw
+
+
+ADVICE_SYSTEM_INSTRUCTION = """
+You are a helpful AI wallet assistant for beginner-friendly crypto guidance.
+Be concise, practical, and educational.
+Never promise returns.
+Never claim certainty.
+Prefer 2 to 4 short paragraphs or bullet-style lines in plain text.
+When discussing investing, mention diversification, risk tolerance, and cautious sizing.
+When portfolio context is provided, refer to it directly.
+""".strip()
+
+
+class GeminiAdviceService:
+    def __init__(self) -> None:
+        if not settings.GEMINI_API_KEY:
+            raise GeminiConfigurationError("Gemini API key is not configured.")
+
+        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        self.model = settings.GEMINI_MODEL
+
+    def generate_response(self, prompt: str, *, context: str | None = None) -> str:
+        contents = prompt if not context else f"{prompt}\n\nContext:\n{context}"
+        try:
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    temperature=0.4,
+                    system_instruction=ADVICE_SYSTEM_INSTRUCTION,
+                ),
+            )
+        except TimeoutError as exc:
+            raise GeminiTimeoutError("Gemini request timed out.") from exc
+        except Exception as exc:  # noqa: BLE001
+            status_code = getattr(exc, "status_code", None)
+            text = str(exc)
+            if status_code == 429 or "RESOURCE_EXHAUSTED" in text or "quota" in text.lower():
+                raise GeminiQuotaExceededError("Gemini quota is exhausted.") from exc
+            raise GeminiRequestError("Gemini request failed.") from exc
+
+        text = getattr(response, "text", "").strip()
+        if not text:
+            raise GeminiResponseValidationError("Gemini returned an empty response.")
+        return text

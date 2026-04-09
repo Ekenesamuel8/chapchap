@@ -100,17 +100,12 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-database_url = os.environ.get("DATABASE_URL")
-
-if database_url:
-    DATABASES = {
-        "default": dj_database_url.parse(
-            database_url,
-            conn_max_age=600,
-        )
-    }
-else:
-    DATABASES = {}
+DATABASES = {
+    "default": dj_database_url.config(
+        default=os.getenv("DATABASE_URL"),
+        conn_max_age=600,
+    )
+}
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -144,6 +139,7 @@ GOOGLE_OAUTH_VERIFY_AUDIENCE = _get_bool(
 )
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
+WALLET_ENCRYPTION_KEY = os.environ.get("WALLET_ENCRYPTION_KEY", "")
 BLOCKCHAIN_NETWORK = (
     os.environ.get("BLOCKCHAIN_NETWORK")
     or os.environ.get("BLOCKCHAIN_MODE")

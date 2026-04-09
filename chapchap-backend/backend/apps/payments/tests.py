@@ -3,9 +3,11 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
+from cryptography.fernet import Fernet
 
 from apps.ai_agent.models import ParsedIntent, PromptRequest
 from apps.blockchain.services import BlockchainSubmissionError, NativeTransferSubmission
@@ -14,6 +16,7 @@ from .models import PaymentIntent
 from .services import build_payment_intent_from_parsed_intent
 
 
+@override_settings(WALLET_ENCRYPTION_KEY=Fernet.generate_key().decode("utf-8"))
 class PaymentSubmissionViewTests(APITestCase):
     def setUp(self) -> None:
         user_model = get_user_model()
@@ -53,9 +56,15 @@ class PaymentSubmissionViewTests(APITestCase):
         )
         return build_payment_intent_from_parsed_intent(parsed_intent)
 
+    @patch("apps.payments.services.get_wallet_private_key")
     @patch("apps.payments.services.EtherlinkService.submit_native_transfer")
-    def test_submit_payment_intent_returns_tx_hash(self, mock_submit_native_transfer) -> None:
+    def test_submit_payment_intent_returns_tx_hash(
+        self,
+        mock_submit_native_transfer,
+        mock_get_wallet_private_key,
+    ) -> None:
         payment_intent = self._create_payment_intent(recipient_address=self.valid_address)
+        mock_get_wallet_private_key.return_value = "0x" + ("1" * 64)
         mock_submit_native_transfer.return_value = NativeTransferSubmission(
             tx_hash="0xabc123",
             explorer_url="https://explorer.example/tx/0xabc123",
@@ -73,6 +82,12 @@ class PaymentSubmissionViewTests(APITestCase):
         self.assertEqual(payment_intent.status, PaymentIntent.STATUS_SUBMITTED)
         self.assertEqual(payment_intent.explorer_url, "https://explorer.example/tx/0xabc123")
         self.assertIsNotNone(payment_intent.submitted_at)
+        mock_get_wallet_private_key.assert_called_once()
+        mock_submit_native_transfer.assert_called_once()
+        submit_kwargs = mock_submit_native_transfer.call_args.kwargs
+        self.assertEqual(submit_kwargs["recipient_address"], self.valid_address)
+        self.assertEqual(submit_kwargs["sender_private_key"], "0x" + ("1" * 64))
+        self.assertEqual(submit_kwargs["sender_address"], payment_intent.wallet.address)
 
     def test_submit_payment_intent_requires_wallet_address(self) -> None:
         payment_intent = self._create_payment_intent(recipient_address=None)

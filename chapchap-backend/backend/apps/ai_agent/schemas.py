@@ -11,6 +11,8 @@ IntentType = Literal[
     "product_search",
     "gift_card",
     "swap",
+    "investment_advice",
+    "portfolio_analysis",
     "unknown",
 ]
 
