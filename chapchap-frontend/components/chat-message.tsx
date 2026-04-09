@@ -130,6 +130,67 @@ export function ChatMessage({
             </p>
           </div>
         ) : null}
+
+        {message.kind === "savings_result_card" ? (
+          <div className="glass-panel edge-glow mt-3 rounded-[1.6rem] border border-emerald-400/20 p-4">
+            <p className="font-display text-lg font-semibold text-white">
+              Savings position ready
+            </p>
+            <div className="mt-3 grid gap-2 text-sm text-white/[0.72]">
+              <p>
+                <span className="font-semibold text-white">Amount:</span>{" "}
+                {message.savings.amount} {message.savings.asset}
+              </p>
+              <p>
+                <span className="font-semibold text-white">Strategy:</span>{" "}
+                {message.savings.strategy_name}
+              </p>
+              <p>
+                <span className="font-semibold text-white">APY:</span>{" "}
+                {message.savings.apy_estimate}%
+              </p>
+            </div>
+            <p className="mt-3 text-xs leading-6 text-white/[0.55]">
+              {message.savings.mode === "demo"
+                ? "Demo mode is active until a live savings integration is added."
+                : "Live savings mode."}
+            </p>
+          </div>
+        ) : null}
+
+        {message.kind === "giftcard_results" ? (
+          <div className="mt-3 grid gap-3">
+            {message.results.map((result, index) => (
+              <div
+                key={`${result.brand}-${result.title}-${index}`}
+                className="glass-panel edge-glow rounded-[1.4rem] border border-white/10 p-4"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="font-display text-base font-semibold text-white">
+                      {result.title}
+                    </p>
+                    <p className="mt-1 text-sm text-white/[0.58]">
+                      {result.country} • {result.denomination}
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-accent-soft/30 bg-accent-soft/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-accent-soft">
+                    {result.mode}
+                  </span>
+                </div>
+                <p className="mt-3 text-sm text-white/[0.62]">
+                  {result.availability}
+                </p>
+                <button
+                  type="button"
+                  className="mt-4 rounded-full border border-white/10 bg-white/[0.05] px-3 py-2 text-xs font-semibold text-white/[0.84]"
+                >
+                  {result.cta_label}
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChatComposer } from "@/components/chat-composer";
 import { ChatMessage } from "@/components/chat-message";
@@ -9,13 +9,12 @@ import { NavTabs } from "@/components/nav-tabs";
 import { PromptSuggestions } from "@/components/prompt-suggestions";
 import { TransactionConfirmationSheet } from "@/components/transaction-confirmation-sheet";
 import { TransactionSuccessCard } from "@/components/transaction-success-card";
-import { TransactionList } from "@/components/transaction-list";
 import { WalletHeader } from "@/components/wallet-header";
 import { useAuth } from "@/components/providers/auth-provider";
 import { chatWithAgent, submitPaymentIntent } from "@/lib/api/agent";
 import { fetchDashboard, fetchFundOptions } from "@/lib/api/auth";
-import { ApiError, API_BASE_URL } from "@/lib/api/client";
-import { recentTransactions } from "@/lib/mock-data";
+import { ApiError } from "@/lib/api/client";
+import { getStoredDashboard, setStoredDashboard } from "@/lib/auth-storage";
 import {
   Attachment,
   AgentChatResponse,
@@ -56,6 +55,7 @@ export function DashboardScreen() {
   const [submittedTransaction, setSubmittedTransaction] =
     useState<SubmittedTransactionView | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const hasStartedInitialLoadRef = useRef(false);
 
   const loadWalletState = async (
     authToken: string,
@@ -68,6 +68,7 @@ export function DashboardScreen() {
     ]);
 
     setDashboard(dashboardResponse);
+    setStoredDashboard(dashboardResponse);
     if (fundOptionsResponse) {
       setFundOptions(fundOptionsResponse);
     }
@@ -79,8 +80,16 @@ export function DashboardScreen() {
       router.replace("/");
       return;
     }
+    if (hasStartedInitialLoadRef.current) return;
+    hasStartedInitialLoadRef.current = true;
 
-    setDashboardLoading(true);
+    const cachedDashboard = getStoredDashboard<DashboardResponse>();
+    if (cachedDashboard) {
+      setDashboard(cachedDashboard);
+      setDashboardLoading(false);
+    }
+
+    setDashboardLoading(!cachedDashboard);
     setDashboardError(null);
 
     loadWalletState(token, { includeFundOptions: true })
@@ -104,6 +113,19 @@ export function DashboardScreen() {
     if (process.env.NODE_ENV !== "development" || !dashboard) return;
     console.log("ChapChap /api/me/dashboard response", dashboard);
   }, [dashboard]);
+
+  useEffect(() => {
+    if (!hydrated || !isAuthenticated || !token) return;
+    const intervalId = window.setInterval(() => {
+      void fetchDashboard(token)
+        .then((response) => {
+          setDashboard(response);
+          setStoredDashboard(response);
+        })
+        .catch(() => undefined);
+    }, 30000);
+    return () => window.clearInterval(intervalId);
+  }, [hydrated, isAuthenticated, token]);
 
   const promptSuggestions = useMemo<PromptSuggestion[]>(
     () =>
@@ -175,8 +197,9 @@ export function DashboardScreen() {
       network: confirmationSummary.network,
       estimatedGas: `${confirmationSummary.estimated_gas_xtz} XTZ`,
       note: confirmationSummary.note ?? "No note",
-      schedule:
-        confirmationSummary.schedule_in_minutes === null
+      schedule: confirmationSummary.scheduled_for
+        ? new Date(confirmationSummary.scheduled_for).toLocaleString()
+        : confirmationSummary.schedule_in_minutes === null
           ? "Immediate"
           : `In ${confirmationSummary.schedule_in_minutes} mins`,
     };
@@ -253,13 +276,21 @@ export function DashboardScreen() {
         txHash: response.tx_hash ?? "",
         explorerUrl: response.explorer_url,
         submittedAt: new Date().toLocaleString(),
+        status: response.status,
       });
       appendChatItem({
         id: crypto.randomUUID(),
         kind: "assistant_message",
-        text: "Your blockchain transfer was submitted successfully.",
+        text:
+          response.status === "scheduled"
+            ? "Your payment has been scheduled successfully."
+            : "Your blockchain transfer was submitted successfully.",
       });
-      setStatusMessage("Transaction submitted onchain. Your wallet balance is updated.");
+      setStatusMessage(
+        response.status === "scheduled"
+          ? "Scheduled payment saved. Your wallet activity is updated."
+          : "Transaction submitted onchain. Your wallet balance is updated.",
+      );
     } catch (error) {
       const message = mapPaymentSubmissionError(error);
       setConfirmationError(message);
@@ -269,7 +300,7 @@ export function DashboardScreen() {
     }
   };
 
-  if (!hydrated || isDashboardLoading) {
+  if (!hydrated || (isDashboardLoading && !dashboard)) {
     return (
       <div className="min-h-screen px-4 py-8 text-white">
         <div className="glass-panel edge-glow mx-auto max-w-4xl rounded-[2rem] border border-white/10 p-6">
@@ -326,10 +357,7 @@ export function DashboardScreen() {
           <main className="glass-panel edge-glow overflow-hidden rounded-[2.2rem] border border-white/10">
             <div className="relative overflow-hidden px-5 pb-6 pt-7 sm:px-8 sm:pt-8">
               <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-[radial-gradient(circle_at_top,_rgba(118,87,246,0.22),_transparent_70%)]" />
-              <div className="mb-4 flex items-center justify-between gap-4">
-                <div className="text-xs uppercase tracking-[0.28em] text-white/[0.35]">
-                  Connected to {API_BASE_URL}
-                </div>
+              <div className="mb-4 flex items-center justify-end gap-4">
                 <button
                   type="button"
                   onClick={() => {
@@ -427,7 +455,6 @@ export function DashboardScreen() {
 
           <aside className="hidden xl:block">
             <div className="sticky top-6 space-y-6">
-              <TransactionList transactions={recentTransactions} />
               <div className="glass-panel edge-glow rounded-[1.8rem] border border-white/10 p-5">
                 <p className="font-display text-xl font-semibold text-white">
                   Live wallet data
@@ -535,6 +562,34 @@ function appendChatResponseFactory(
         id: crypto.randomUUID(),
         kind: "swap_preview_card",
         preview: response.swap,
+      });
+      return;
+    }
+
+    if (response.type === "savings_result") {
+      appendChatItem({
+        id: crypto.randomUUID(),
+        kind: "assistant_message",
+        text: response.message,
+      });
+      appendChatItem({
+        id: crypto.randomUUID(),
+        kind: "savings_result_card",
+        savings: response.savings,
+      });
+      return;
+    }
+
+    if (response.type === "giftcard_results") {
+      appendChatItem({
+        id: crypto.randomUUID(),
+        kind: "assistant_message",
+        text: response.message,
+      });
+      appendChatItem({
+        id: crypto.randomUUID(),
+        kind: "giftcard_results",
+        results: response.results,
       });
       return;
     }

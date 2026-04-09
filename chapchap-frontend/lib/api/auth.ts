@@ -4,6 +4,7 @@ import {
   AuthUser,
   DashboardResponse,
   FundOptionsResponse,
+  TransactionHistoryItem,
 } from "@/lib/types";
 
 export function loginWithGoogleIdToken(idToken: string) {
@@ -29,6 +30,13 @@ export function fetchDashboard(token?: string | null) {
 
 export function fetchFundOptions(token?: string | null) {
   return apiRequest<FundOptionsResponse>("/api/wallet/fund-options/", {
+    method: "GET",
+    token,
+  });
+}
+
+export function fetchHistory(token?: string | null) {
+  return apiRequest<TransactionHistoryItem[]>("/api/history/", {
     method: "GET",
     token,
   });

@@ -38,7 +38,7 @@ export type DashboardResponse = {
   user: AuthUser;
   wallet: WalletSummary;
   balances: BalanceItem[];
-  recent_transactions: Array<Record<string, string>>;
+  recent_transactions: TransactionHistoryItem[];
   prompt_suggestions: string[];
 };
 
@@ -61,6 +61,7 @@ export type PaymentConfirmationSummary = {
   estimated_gas_xtz: string;
   note: string | null;
   schedule_in_minutes: number | null;
+  scheduled_for?: string | null;
   explorer_base_url?: string | null;
 };
 
@@ -97,9 +98,23 @@ export type ExecuteResponse = {
 
 export type PaymentSubmissionResponse = {
   payment_intent_id: number;
-  status: "submitted" | "failed" | "awaiting_confirmation" | "confirmed" | "draft";
+  status:
+    | "submitted"
+    | "failed"
+    | "awaiting_confirmation"
+    | "confirmed"
+    | "draft"
+    | "scheduled";
   tx_hash: string | null;
   explorer_url: string | null;
+  balance_summary?: {
+    wallet_address: string;
+    balances: Array<{
+      asset_symbol: string;
+      balance: string;
+      balance_usd: string;
+    }>;
+  };
 };
 
 export type PendingIntentSessionSummary = {
@@ -124,6 +139,27 @@ export type ProductResultItem = {
   product_url: string;
 };
 
+export type GiftCardResultItem = {
+  brand: string;
+  title: string;
+  denomination: string;
+  country: string;
+  availability: string;
+  cta_label: string;
+  mode: string;
+};
+
+export type SavingsResult = {
+  id: number;
+  asset: string;
+  amount: string;
+  strategy_name: string;
+  strategy_type: string;
+  apy_estimate: string;
+  mode: string;
+  status: string;
+};
+
 export type SwapPreview = {
   amount_in: string;
   source_token: string;
@@ -142,7 +178,7 @@ export type AgentChatResponse =
   | {
       type: "assistant_followup";
       message: string;
-      intent: "payment" | "product_search" | "swap";
+      intent: "payment" | "product_search" | "swap" | "save";
       session?: PendingIntentSessionSummary;
     }
   | {
@@ -174,6 +210,18 @@ export type AgentChatResponse =
       intent: "swap";
       session?: PendingIntentSessionSummary;
       swap: SwapPreview;
+    }
+  | {
+      type: "savings_result";
+      message: string;
+      intent: "save";
+      savings: SavingsResult;
+    }
+  | {
+      type: "giftcard_results";
+      message: string;
+      intent: "gift_card";
+      results: GiftCardResultItem[];
     };
 
 export type PromptSuggestion = {
@@ -190,6 +238,24 @@ export type TransactionRecord = {
   time: string;
   status: "success" | "pending" | "incoming";
   hash: string;
+};
+
+export type TransactionHistoryItem = {
+  id: number;
+  transaction_type: "send" | "receive" | "swap" | "giftcard" | "save";
+  asset_symbol: string;
+  amount: string;
+  network: string;
+  recipient_address: string | null;
+  sender_address: string | null;
+  tx_hash: string | null;
+  explorer_url: string | null;
+  status: "pending" | "submitted" | "confirmed" | "failed" | "scheduled";
+  title: string | null;
+  subtitle: string | null;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 };
 
 export type PaymentIntentView = {
@@ -211,6 +277,7 @@ export type SubmittedTransactionView = {
   txHash: string;
   explorerUrl: string | null;
   submittedAt: string;
+  status?: string;
 };
 
 export type ChatItem =
@@ -245,6 +312,16 @@ export type ChatItem =
       id: string;
       kind: "swap_preview_card";
       preview: SwapPreview;
+    }
+  | {
+      id: string;
+      kind: "savings_result_card";
+      savings: SavingsResult;
+    }
+  | {
+      id: string;
+      kind: "giftcard_results";
+      results: GiftCardResultItem[];
     }
   | {
       id: string;

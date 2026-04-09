@@ -31,7 +31,9 @@ export function TransactionSuccessCard({
           <SuccessIcon className="size-8" />
         </div>
         <h3 className="mt-4 font-display text-2xl font-bold text-white sm:text-3xl">
-          Transaction Successful
+          {transaction.status === "scheduled"
+            ? "Payment Scheduled"
+            : "Transaction Successful"}
         </h3>
         <p className="mt-2 text-sm leading-6 text-white/[0.68]">
           {transaction.amount} {transaction.asset} to {transaction.recipient}
@@ -40,12 +42,19 @@ export function TransactionSuccessCard({
         <div className="mt-5 rounded-[1.6rem] border border-white/10 bg-white/5 p-4 text-left">
           <DetailRow label="Recipient" value={transaction.recipient} />
           <DetailRow label="Network" value={transaction.network} />
-          <DetailRow label="Tx hash" value={shortenHash(transaction.txHash)} />
+          <DetailRow
+            label={transaction.status === "scheduled" ? "Status" : "Tx hash"}
+            value={
+              transaction.status === "scheduled"
+                ? "Scheduled"
+                : shortenHash(transaction.txHash)
+            }
+          />
           <DetailRow label="Timestamp" value={transaction.submittedAt} />
         </div>
 
         <div className="mt-5 grid gap-3">
-          {transaction.explorerUrl ? (
+          {transaction.explorerUrl && transaction.status !== "scheduled" ? (
             <a
               href={transaction.explorerUrl}
               target="_blank"
