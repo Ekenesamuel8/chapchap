@@ -57,6 +57,22 @@ export function DashboardScreen() {
     useState<SubmittedTransactionView | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
+  const loadWalletState = async (
+    authToken: string,
+    options?: { includeFundOptions?: boolean },
+  ) => {
+    const includeFundOptions = options?.includeFundOptions ?? false;
+    const [dashboardResponse, fundOptionsResponse] = await Promise.all([
+      fetchDashboard(authToken),
+      includeFundOptions ? fetchFundOptions(authToken) : Promise.resolve(null),
+    ]);
+
+    setDashboard(dashboardResponse);
+    if (fundOptionsResponse) {
+      setFundOptions(fundOptionsResponse);
+    }
+  };
+
   useEffect(() => {
     if (!hydrated) return;
     if (!isAuthenticated || !token) {
@@ -67,20 +83,7 @@ export function DashboardScreen() {
     setDashboardLoading(true);
     setDashboardError(null);
 
-    Promise.allSettled([fetchDashboard(token), fetchFundOptions(token)])
-      .then((results) => {
-        const [dashboardResult, fundOptionsResult] = results;
-
-        if (dashboardResult.status === "fulfilled") {
-          setDashboard(dashboardResult.value);
-        } else {
-          throw dashboardResult.reason;
-        }
-
-        if (fundOptionsResult.status === "fulfilled") {
-          setFundOptions(fundOptionsResult.value);
-        }
-      })
+    loadWalletState(token, { includeFundOptions: true })
       .catch((error) => {
         if (error instanceof ApiError && error.status === 401) {
           logout();
@@ -180,7 +183,7 @@ export function DashboardScreen() {
   }, [confirmationSummary]);
 
   const handleSuggestionSelect = (label: string) => {
-    setComposerValue(label);
+    void sendPrompt(label);
   };
 
   const appendChatItem = (item: ChatItem) => {
@@ -194,8 +197,8 @@ export function DashboardScreen() {
     setConfirmOpen,
   );
 
-  const handleSend = async () => {
-    const prompt = composerValue.trim();
+  const sendPrompt = async (rawPrompt?: string) => {
+    const prompt = (rawPrompt ?? composerValue).trim();
     if (!prompt || !token) return;
 
     appendChatItem({
@@ -226,6 +229,10 @@ export function DashboardScreen() {
     }
   };
 
+  const handleSend = async () => {
+    await sendPrompt();
+  };
+
   const handleConfirmTransaction = async () => {
     if (!confirmationPaymentIntentId || !token || !paymentIntentView) return;
 
@@ -235,6 +242,8 @@ export function DashboardScreen() {
 
     try {
       const response = await submitPaymentIntent(confirmationPaymentIntentId, token);
+      setStatusMessage("Transaction submitted onchain. Refreshing wallet...");
+      await loadWalletState(token);
       setConfirmOpen(false);
       setSubmittedTransaction({
         amount: paymentIntentView.amount,
@@ -250,7 +259,7 @@ export function DashboardScreen() {
         kind: "assistant_message",
         text: "Your blockchain transfer was submitted successfully.",
       });
-      setStatusMessage("Transaction submitted onchain.");
+      setStatusMessage("Transaction submitted onchain. Your wallet balance is updated.");
     } catch (error) {
       const message = mapPaymentSubmissionError(error);
       setConfirmationError(message);
@@ -512,6 +521,20 @@ function appendChatResponseFactory(
         id: crypto.randomUUID(),
         kind: "product_results",
         results: response.results,
+      });
+      return;
+    }
+
+    if (response.type === "swap_preview") {
+      appendChatItem({
+        id: crypto.randomUUID(),
+        kind: "assistant_message",
+        text: response.message,
+      });
+      appendChatItem({
+        id: crypto.randomUUID(),
+        kind: "swap_preview_card",
+        preview: response.swap,
       });
       return;
     }

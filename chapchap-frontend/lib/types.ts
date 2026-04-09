@@ -124,6 +124,16 @@ export type ProductResultItem = {
   product_url: string;
 };
 
+export type SwapPreview = {
+  amount_in: string;
+  source_token: string;
+  destination_token: string;
+  estimated_output: string;
+  network: string;
+  estimated_fee_xtz: string;
+  slippage_note: string;
+};
+
 export type AgentChatResponse =
   | {
       type: "assistant_message";
@@ -132,7 +142,7 @@ export type AgentChatResponse =
   | {
       type: "assistant_followup";
       message: string;
-      intent: "payment" | "product_search";
+      intent: "payment" | "product_search" | "swap";
       session?: PendingIntentSessionSummary;
     }
   | {
@@ -157,6 +167,13 @@ export type AgentChatResponse =
       query?: string;
       session: PendingIntentSessionSummary;
       results: ProductResultItem[];
+    }
+  | {
+      type: "swap_preview";
+      message: string;
+      intent: "swap";
+      session?: PendingIntentSessionSummary;
+      swap: SwapPreview;
     };
 
 export type PromptSuggestion = {
@@ -223,6 +240,11 @@ export type ChatItem =
       id: string;
       kind: "product_results";
       results: ProductResultItem[];
+    }
+  | {
+      id: string;
+      kind: "swap_preview_card";
+      preview: SwapPreview;
     }
   | {
       id: string;

@@ -101,6 +101,35 @@ export function ChatMessage({
             ))}
           </div>
         ) : null}
+
+        {message.kind === "swap_preview_card" ? (
+          <div className="glass-panel edge-glow mt-3 rounded-[1.6rem] border border-cyan-400/20 p-4">
+            <p className="font-display text-lg font-semibold text-white">
+              Review swap preview
+            </p>
+            <div className="mt-3 grid gap-2 text-sm text-white/[0.72]">
+              <p>
+                <span className="font-semibold text-white">Swap in:</span>{" "}
+                {message.preview.amount_in} {message.preview.source_token}
+              </p>
+              <p>
+                <span className="font-semibold text-white">Estimated out:</span>{" "}
+                {message.preview.estimated_output} {message.preview.destination_token}
+              </p>
+              <p>
+                <span className="font-semibold text-white">Network:</span>{" "}
+                {message.preview.network}
+              </p>
+              <p>
+                <span className="font-semibold text-white">Estimated fee:</span>{" "}
+                {message.preview.estimated_fee_xtz} XTZ
+              </p>
+            </div>
+            <p className="mt-3 text-xs leading-6 text-white/[0.55]">
+              {message.preview.slippage_note}
+            </p>
+          </div>
+        ) : null}
       </div>
     </div>
   );
