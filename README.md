@@ -1,4 +1,4 @@
-# ChapChap
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/5e32d78e-bfde-4c43-8e71-4bb573282520" /># ChapChap
 
 ChapChap is an AI-powered wallet assistant built for Tezos EVM on Etherlink. It helps users interact with crypto through natural language instead of complex wallet interfaces, making common actions like funding a wallet, sending assets, reviewing transactions, and exploring adjacent product flows more approachable for everyday users. The project combines conversational AI, a mobile-first frontend, a Django backend, and real Etherlink testnet integration to create a beginner-friendly onchain experience.
 
@@ -180,16 +180,6 @@ ChapChap includes a lightweight onchain registry contract used to record payment
 - Network: `Etherlink Testnet`
 - Purpose: `Store ChapChap payment intent records onchain for demo visibility, auditability, and hackathon submission readiness`
 
-## Screenshots
-
-Add screenshots here before submission.
-
-- Landing / onboarding screen
-- Dashboard / wallet overview
-- AI payment confirmation flow
-- Successful transaction state
-- History page
-- Fund wallet flow
 
 ## Demo Video
 
