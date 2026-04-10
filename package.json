@@ -1,0 +1,16 @@
+{
+  "name": "chapchap-contracts",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Hardhat deployment workspace for ChapChap contracts",
+  "scripts": {
+    "compile:contracts": "hardhat compile",
+    "deploy:etherlink-testnet": "hardhat run scripts/deploy.js --network etherlinkTestnet",
+    "read:etherlink-testnet": "hardhat run scripts/read-payment-intents.js --network etherlinkTestnet"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^3.1.0",
+    "dotenv": "^16.6.1",
+    "hardhat": "^2.24.1"
+  }
+}

@@ -1,6 +1,6 @@
 # ChapChap
 
-ChapChap is an AI-powered wallet assistant built for Tezos EVM on Etherlink. It helps users interact with crypto through natural language instead of complex wallet interfaces, making common Web3 actions like funding a wallet, sending assets, reviewing transactions, and exploring related product flows feel more approachable for everyday users. The project combines conversational AI, a mobile-first frontend, and real Etherlink testnet integration to create a beginner-friendly onchain experience.
+ChapChap is an AI-powered wallet assistant built for Tezos EVM on Etherlink. It helps users interact with crypto through natural language instead of complex wallet interfaces, making common actions like funding a wallet, sending assets, reviewing transactions, and exploring adjacent product flows more approachable for everyday users. The project combines conversational AI, a mobile-first frontend, a Django backend, and real Etherlink testnet integration to create a beginner-friendly onchain experience.
 
 ## Problem
 
@@ -63,22 +63,22 @@ AI is a meaningful part of ChapChap, not just a cosmetic chatbot layer.
 
 ChapChap uses AI to make wallet interactions more usable and more natural:
 
-- Natural language intent parsing  
+- Natural language parsing  
   Users can describe payment requests in plain English, and the assistant interprets the intent, amount, asset, timing, and recipient context.
 
-- Conversational follow-up flow  
+- Conversational flow  
   If a request is incomplete, ChapChap asks for the missing information instead of failing or forcing the user into a separate form.
 
+- Suggestions and guidance  
+  The assistant can guide users through supported actions and provide context-aware follow-up prompts.
+
 - Portfolio and investment prompts  
-  Users can ask questions like “How do I invest?” or “Analyze my portfolio and suggest investment,” and ChapChap responds with guidance informed by wallet context where available.
+  Users can ask questions like `How do I invest?` or `Analyze my portfolio and suggest investment`, and ChapChap responds with educational guidance informed by wallet context where available.
 
 - Shopping and product search assistance  
-  ChapChap can help users explore product-related prompts by returning practical shopping links and conversational suggestions.
+  ChapChap can help users explore product-related prompts by returning practical shopping links and related suggestions.
 
-- Guided UX instead of generic chat  
-  The assistant is designed to move users toward clear, reviewable actions rather than produce open-ended conversation with no execution path.
-
-To keep the system efficient and resilient, the app also uses deterministic logic where possible and relies on LLM calls only when they add real value.
+To keep the system efficient and resilient, the app uses deterministic logic where possible and relies on LLM calls only when they add real value.
 
 ## Etherlink / Tezos EVM Integration
 
@@ -91,15 +91,14 @@ Current Etherlink integration includes:
 - explorer links for submitted transactions
 - chain-aware wallet metadata and asset display
 - Etherlink-backed confirmation and transaction flow
+- an onchain payment intent registry contract deployed on Etherlink testnet
 
 Why Etherlink matters:
 
 - it provides an EVM-compatible environment, which simplifies developer tooling and wallet integration patterns
-- it aligns with a low-friction path for building familiar Web3 flows
-- it enables real onchain execution while supporting a hackathon-friendly development cycle
-- it is a strong fit for building a conversational wallet UX that still settles actions transparently onchain
-
-The project is already structured to support a future smart contract and protocol integration layer, and a dedicated contract section is included below for that purpose.
+- it enables low-friction Web3 UX for builders and users
+- it supports real onchain execution while remaining practical for hackathon delivery
+- it is a strong fit for a conversational wallet experience that still settles actions transparently onchain
 
 ## Architecture
 
@@ -111,7 +110,7 @@ ChapChap is split into a frontend, backend, database, blockchain integration lay
 
 - Backend  
   Django + Django REST Framework  
-  Handles auth, wallet provisioning, conversational agent routing, payment preparation, transaction execution, and history persistence.
+  Handles auth, wallet provisioning, conversational agent routing, payment preparation, transaction execution, history persistence, and optional registry writes.
 
 - Database  
   PostgreSQL  
@@ -119,25 +118,25 @@ ChapChap is split into a frontend, backend, database, blockchain integration lay
 
 - Blockchain Integration  
   Web3.py + Etherlink RPC  
-  Reads balances from Etherlink and submits real native-token transactions on Etherlink testnet.
+  Reads balances from Etherlink, submits real native-token transactions on Etherlink testnet, and can record payment intents onchain.
 
 - AI Layer  
-  Gemini-backed intent/advice services plus deterministic routing logic  
-  Used for natural language interpretation, conversational assistance, investment/portfolio responses, and smart fallback behavior.
+  Gemini-backed advice and interpretation services plus deterministic routing logic  
+  Used for natural language interpretation, portfolio prompts, and assistant behavior.
 
 ## User Flow
 
-1. The user signs in with Google.
+1. Sign in with Google.
 2. ChapChap automatically creates a wallet for the user.
-3. The user funds the wallet using the wallet address or testnet funding flow.
-4. The user types a request in the chat interface.
+3. Fund the wallet using the wallet address or testnet funding flow.
+4. Type a request in the chat interface.
 5. ChapChap interprets the request and asks follow-up questions if needed.
 6. ChapChap prepares a confirmation view with the transaction details.
 7. After explicit confirmation, the transaction is submitted on Etherlink testnet.
 
 ## Working Features
 
-The following features are currently implemented and working in the project:
+The following features are currently implemented and working:
 
 - Google authentication
 - automatic wallet creation per user
@@ -151,10 +150,10 @@ The following features are currently implemented and working in the project:
 - transaction confirmation and success UX
 - explorer link generation
 - PostgreSQL-backed transaction history
-- portfolio/investment advice prompts
+- portfolio and investment advice prompts
 - product search responses with useful store links
 - scheduled payment creation and scheduled history state
-- deployed frontend and backend structure
+- deployed frontend, backend, and smart contract setup
 
 ## Demo / Planned Features
 
@@ -174,12 +173,12 @@ Some flows are currently implemented in demo mode or remain partially planned fo
 
 ## Smart Contract
 
-This section is reserved for contract details if/when a dedicated onchain contract is deployed.
+ChapChap includes a lightweight onchain registry contract used to record payment intent metadata on Etherlink testnet.
 
-- Contract Name: `TBD`
-- Contract Address: `TBD`
-- Network: `Etherlink Testnet / Etherlink Mainnet`
-- Purpose: `TBD`
+- Contract Name: `ChapChapPaymentRegistry`
+- Contract Address: `0x9f68816F73bCf4A01b73dc75A1f0012AD7362d35`
+- Network: `Etherlink Testnet`
+- Purpose: `Store ChapChap payment intent records onchain for demo visibility, auditability, and hackathon submission readiness`
 
 ## Screenshots
 
@@ -194,9 +193,7 @@ Add screenshots here before submission.
 
 ## Demo Video
 
-Add demo video link here before submission.
-
-- Demo Video: `TBD`
+- Demo Video: `https://www.loom.com/share/81ba612a3c364b6b96b501dbf80300a3`
 
 ## Repository Structure
 
@@ -207,6 +204,12 @@ At a high level, the repository is organized like this:
 
 - `chapchap-backend/`  
   Django backend application, REST API, auth, wallet provisioning, AI orchestration, blockchain integration, and history models.
+
+- `contracts/`  
+  Solidity contracts for Etherlink deployment.
+
+- `scripts/`  
+  Hardhat deployment and read scripts for the ChapChap contract workspace.
 
 - `chapchap-backend/backend/apps/users/`  
   Custom user model and user-facing profile/dashboard endpoints.
@@ -224,7 +227,7 @@ At a high level, the repository is organized like this:
   Payment intents, submission flow, history records, scheduled payment support, savings demo, and gift card demo records.
 
 - `chapchap-backend/backend/apps/blockchain/`  
-  Etherlink read/write integration, gas helpers, and transaction submission service.
+  Etherlink read/write integration, gas helpers, native transfer submission, and payment registry recording.
 
 ## Local Setup
 
@@ -233,38 +236,74 @@ At a high level, the repository is organized like this:
 ```bash
 git clone <your-repo-url>
 cd chapchap
+```
 
+### 2. Set up the backend
 
+```bash
 cd chapchap-backend
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+```
 
-backend/.env
+Create:
 
+```text
+chapchap-backend/backend/.env
+```
 
+Then run:
+
+```bash
 python backend/manage.py migrate
-
-
 python backend/manage.py runserver
+```
 
+### 3. Set up the frontend
 
+Open a new terminal:
+
+```bash
 cd chapchap-frontend
 npm install
+```
 
-
-Configure frontend environment variables
 Create:
-.env.local
 
-Start the frontend
+```text
+chapchap-frontend/.env.local
+```
+
+Then run:
+
+```bash
 npm run dev
+```
 
-Open the app
-Frontend: http://localhost:3000
+### 4. Optional contract commands
 
-Backend: http://127.0.0.1:8000
+From the repo root:
 
+```bash
+npm install
+npm run compile:contracts
+npm run deploy:etherlink-testnet
+npm run read:etherlink-testnet
+```
+
+### 5. Open the app
+
+- Frontend: `http://localhost:3000`
+- Backend: `http://127.0.0.1:8000`
+
+## Environment Variables
+
+### Backend
+
+Use placeholders like these in `chapchap-backend/backend/.env`:
+
+```env
 DJANGO_SETTINGS_MODULE=config.settings.dev
 SECRET_KEY=change-me
 DEBUG=True
@@ -288,9 +327,50 @@ ETHERLINK_TESTNET_SENDER_PRIVATE_KEY=your-funded-testnet-private-key
 ETHERLINK_TESTNET_SENDER_ADDRESS=optional-derived-or-explicit-address
 ETHERLINK_TESTNET_USDC_ADDRESS=
 
+CHAPCHAP_PAYMENT_REGISTRY_ENABLED=True
+CHAPCHAP_PAYMENT_REGISTRY_ADDRESS=0x9f68816F73bCf4A01b73dc75A1f0012AD7362d35
+```
+
+### Frontend
+
+Use placeholders like these in `chapchap-frontend/.env.local`:
+
+```env
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-client-id
 NEXT_PUBLIC_ENABLE_DEV_AUTH=false
+```
 
+### Database note
 
-video: https://www.loom.com/share/81ba612a3c364b6b96b501dbf80300a3
+- Local development should use your provider's external PostgreSQL URL.
+- Render production should use Render's internal PostgreSQL URL.
+- The app uses `DATABASE_URL` as the single source of truth, so no code changes are needed between environments.
+
+## Team
+
+Add team details here before submission.
+
+- Name: `TBD`
+- Role: `TBD`
+
+- Name: `TBD`
+- Role: `TBD`
+
+- Name: `TBD`
+- Role: `TBD`
+
+## Future Improvements
+
+- real onchain swap execution
+- real savings protocol integration
+- full Bitrefill purchase flow
+- smarter scheduled transaction execution and retries
+- richer portfolio analytics and recommendation quality
+- stronger multi-asset support
+- production-grade custody and key management architecture
+- wallet export and recovery flows
+
+## License
+
+MIT License

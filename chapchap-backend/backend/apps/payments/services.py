@@ -165,16 +165,6 @@ def submit_payment_intent(payment_intent: PaymentIntent) -> PaymentIntent:
             code="invalid_amount",
         )
 
-    if payment_intent.is_scheduled and payment_intent.scheduled_for and payment_intent.scheduled_for > timezone.now():
-        payment_intent.status = PaymentIntent.STATUS_SCHEDULED
-        payment_intent.execution_status = PaymentIntent.EXECUTION_SCHEDULED
-        payment_intent.failure_reason = None
-        payment_intent.save(
-            update_fields=["status", "execution_status", "failure_reason", "updated_at"]
-        )
-        record_payment_history(payment_intent, status=TransactionHistory.STATUS_SCHEDULED)
-        return payment_intent
-
     wallet = ensure_wallet_profile(payment_intent.user)
     try:
         sender_private_key = get_wallet_private_key(wallet)
@@ -183,6 +173,17 @@ def submit_payment_intent(payment_intent: PaymentIntent) -> PaymentIntent:
             "Your wallet is unavailable right now.",
             code="wallet_unavailable",
         ) from exc
+
+    if payment_intent.is_scheduled and payment_intent.scheduled_for and payment_intent.scheduled_for > timezone.now():
+        payment_intent.status = PaymentIntent.STATUS_SCHEDULED
+        payment_intent.execution_status = PaymentIntent.EXECUTION_SCHEDULED
+        payment_intent.failure_reason = None
+        payment_intent.save(
+            update_fields=["status", "execution_status", "failure_reason", "updated_at"]
+        )
+        record_payment_history(payment_intent, status=TransactionHistory.STATUS_SCHEDULED)
+        _record_payment_intent_onchain(payment_intent=payment_intent, sender_private_key=sender_private_key)
+        return payment_intent
 
     try:
         submission = EtherlinkService().submit_native_transfer(
@@ -214,6 +215,7 @@ def submit_payment_intent(payment_intent: PaymentIntent) -> PaymentIntent:
             "updated_at",
         ]
     )
+    _record_payment_intent_onchain(payment_intent=payment_intent, sender_private_key=sender_private_key)
     record_payment_history(payment_intent, status=TransactionHistory.STATUS_SUBMITTED)
     return payment_intent
 
@@ -390,3 +392,49 @@ def _clean_optional(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _record_payment_intent_onchain(
+    *,
+    payment_intent: PaymentIntent,
+    sender_private_key: str,
+) -> None:
+    if not settings.CHAPCHAP_PAYMENT_REGISTRY_ENABLED or not settings.CHAPCHAP_PAYMENT_REGISTRY_ADDRESS:
+        return
+    if payment_intent.registry_tx_hash:
+        return
+
+    recipient_address = _clean_optional(payment_intent.recipient_address)
+    amount = _parse_amount(payment_intent.amount)
+    if not recipient_address or amount is None:
+        return
+
+    scheduled_for_timestamp = 0
+    if payment_intent.scheduled_for is not None:
+        scheduled_for_timestamp = int(payment_intent.scheduled_for.timestamp())
+
+    try:
+        submission = EtherlinkService().record_payment_intent(
+            registry_address=settings.CHAPCHAP_PAYMENT_REGISTRY_ADDRESS,
+            recipient_address=recipient_address,
+            amount=amount,
+            token_symbol=payment_intent.token_symbol,
+            note=payment_intent.note,
+            scheduled_for_timestamp=scheduled_for_timestamp,
+            sender_private_key=sender_private_key,
+            sender_address=payment_intent.wallet.address,
+        )
+    except BlockchainSubmissionError:
+        return
+
+    payment_intent.registry_tx_hash = submission.tx_hash
+    payment_intent.registry_payment_intent_id = submission.registry_payment_intent_id
+    payment_intent.registry_contract_address = submission.registry_address
+    payment_intent.save(
+        update_fields=[
+            "registry_tx_hash",
+            "registry_payment_intent_id",
+            "registry_contract_address",
+            "updated_at",
+        ]
+    )

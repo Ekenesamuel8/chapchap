@@ -79,6 +79,9 @@ class PaymentIntent(models.Model):
     submitted_at = models.DateTimeField(blank=True, null=True)
     confirmed_at = models.DateTimeField(blank=True, null=True)
     failure_reason = models.TextField(blank=True, null=True)
+    registry_tx_hash = models.CharField(max_length=255, blank=True, null=True)
+    registry_payment_intent_id = models.PositiveBigIntegerField(blank=True, null=True)
+    registry_contract_address = models.CharField(max_length=255, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

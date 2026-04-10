@@ -36,6 +36,35 @@ ERC20_ABI: list[dict[str, Any]] = [
     },
 ]
 
+PAYMENT_REGISTRY_ABI: list[dict[str, Any]] = [
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": False, "internalType": "uint256", "name": "id", "type": "uint256"},
+            {"indexed": True, "internalType": "address", "name": "creator", "type": "address"},
+            {"indexed": True, "internalType": "address", "name": "recipient", "type": "address"},
+            {"indexed": False, "internalType": "uint256", "name": "amount", "type": "uint256"},
+            {"indexed": False, "internalType": "string", "name": "tokenSymbol", "type": "string"},
+            {"indexed": False, "internalType": "uint256", "name": "scheduledFor", "type": "uint256"},
+        ],
+        "name": "PaymentIntentCreated",
+        "type": "event",
+    },
+    {
+        "inputs": [
+            {"internalType": "address", "name": "recipient", "type": "address"},
+            {"internalType": "uint256", "name": "amount", "type": "uint256"},
+            {"internalType": "string", "name": "tokenSymbol", "type": "string"},
+            {"internalType": "string", "name": "note", "type": "string"},
+            {"internalType": "uint256", "name": "scheduledFor", "type": "uint256"},
+        ],
+        "name": "createPaymentIntent",
+        "outputs": [{"internalType": "uint256", "name": "newId", "type": "uint256"}],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+]
+
 
 class BlockchainReadError(Exception):
     """Raised when a read-only blockchain operation fails."""
@@ -79,6 +108,15 @@ class NativeTransferSubmission:
     explorer_url: str
     sender_address: str
     recipient_address: str
+
+
+@dataclass(frozen=True)
+class RegistryIntentSubmission:
+    tx_hash: str
+    explorer_url: str
+    sender_address: str
+    registry_address: str
+    registry_payment_intent_id: int | None
 
 
 def get_supported_assets() -> list[SupportedAsset]:
@@ -386,6 +424,141 @@ class EtherlinkService:
             explorer_url=explorer_url,
             sender_address=derived_sender_address,
             recipient_address=recipient_address,
+        )
+
+    def record_payment_intent(
+        self,
+        *,
+        registry_address: str,
+        recipient_address: str,
+        amount: Decimal,
+        token_symbol: str,
+        note: str | None,
+        scheduled_for_timestamp: int,
+        sender_private_key: str,
+        sender_address: str | None = None,
+    ) -> RegistryIntentSubmission:
+        web3 = self._require_web3()
+        if not registry_address:
+            raise BlockchainSubmissionError(
+                "Payment registry contract is not configured.",
+                code="registry_not_configured",
+            )
+        if not sender_private_key:
+            raise BlockchainSubmissionError(
+                "Sender private key is not configured.",
+                code="missing_sender_key",
+            )
+        if not Web3.is_address(recipient_address):
+            raise BlockchainSubmissionError(
+                "Recipient wallet address is invalid.",
+                code="invalid_recipient_address",
+            )
+
+        account = Account.from_key(sender_private_key)
+        derived_sender_address = account.address
+        if sender_address and sender_address.lower() != derived_sender_address.lower():
+            raise BlockchainSubmissionError(
+                "Sender wallet address does not match the configured private key.",
+                code="sender_mismatch",
+            )
+
+        checksum_sender = web3.to_checksum_address(derived_sender_address)
+        checksum_recipient = web3.to_checksum_address(recipient_address)
+        checksum_registry = web3.to_checksum_address(registry_address)
+        contract = web3.eth.contract(address=checksum_registry, abi=PAYMENT_REGISTRY_ABI)
+        native_asset = get_native_asset()
+        amount_units = int(amount * (Decimal(10) ** native_asset.decimals))
+
+        logger.info(
+            "blockchain.registry_record_start network_key=%s sender=%s recipient=%s registry=%s amount=%s token_symbol=%s scheduled_for=%s",
+            settings.BLOCKCHAIN_NETWORK,
+            derived_sender_address,
+            recipient_address,
+            registry_address,
+            amount,
+            token_symbol,
+            scheduled_for_timestamp,
+        )
+
+        try:
+            nonce = web3.eth.get_transaction_count(checksum_sender)
+            gas_price = web3.eth.gas_price
+            tx = contract.functions.createPaymentIntent(
+                checksum_recipient,
+                amount_units,
+                token_symbol,
+                note or "",
+                scheduled_for_timestamp,
+            ).build_transaction(
+                {
+                    "chainId": settings.BLOCKCHAIN_CHAIN_ID,
+                    "from": checksum_sender,
+                    "nonce": nonce,
+                    "gasPrice": gas_price,
+                }
+            )
+            if "gas" not in tx:
+                tx["gas"] = web3.eth.estimate_gas(tx)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "blockchain.registry_record_build_failed network_key=%s sender=%s registry=%s",
+                settings.BLOCKCHAIN_NETWORK,
+                derived_sender_address,
+                registry_address,
+                exc_info=True,
+            )
+            raise BlockchainSubmissionError(
+                "Payment registry transaction could not be built.",
+                code="registry_build_failed",
+            ) from exc
+
+        try:
+            signed_tx = account.sign_transaction(tx)
+            raw_hash = web3.eth.send_raw_transaction(signed_tx.raw_transaction)
+            tx_hash = raw_hash.hex()
+            receipt = web3.eth.wait_for_transaction_receipt(raw_hash, timeout=120)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "blockchain.registry_record_submit_failed network_key=%s sender=%s registry=%s",
+                settings.BLOCKCHAIN_NETWORK,
+                derived_sender_address,
+                registry_address,
+                exc_info=True,
+            )
+            raise BlockchainSubmissionError(
+                "Payment registry transaction could not be submitted.",
+                code="registry_submit_failed",
+            ) from exc
+
+        registry_payment_intent_id: int | None = None
+        try:
+            logs = contract.events.PaymentIntentCreated().process_receipt(receipt)
+            if logs:
+                registry_payment_intent_id = int(logs[0]["args"]["id"])
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "blockchain.registry_record_receipt_parse_failed network_key=%s tx_hash=%s",
+                settings.BLOCKCHAIN_NETWORK,
+                tx_hash,
+                exc_info=True,
+            )
+
+        explorer_url = f"{settings.BLOCKCHAIN_EXPLORER_BASE_URL.rstrip('/')}/tx/{tx_hash}"
+        logger.info(
+            "blockchain.registry_record_success network_key=%s sender=%s registry=%s tx_hash=%s registry_payment_intent_id=%s",
+            settings.BLOCKCHAIN_NETWORK,
+            derived_sender_address,
+            registry_address,
+            tx_hash,
+            registry_payment_intent_id,
+        )
+        return RegistryIntentSubmission(
+            tx_hash=tx_hash,
+            explorer_url=explorer_url,
+            sender_address=derived_sender_address,
+            registry_address=registry_address,
+            registry_payment_intent_id=registry_payment_intent_id,
         )
 
     def _require_web3(self) -> Web3:
