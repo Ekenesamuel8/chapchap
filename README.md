@@ -196,7 +196,7 @@ Add screenshots here before submission.
 
 Add demo video link here before submission.
 
-- Demo Video: `TBD`
+- Demo Video: https://www.loom.com/share/81ba612a3c364b6b96b501dbf80300a3
 
 ## Repository Structure
 
