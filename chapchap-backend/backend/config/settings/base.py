@@ -68,6 +68,7 @@ LOCAL_APPS = [
     "apps.authn",
     "apps.wallets",
     "apps.ai_agent",
+    "apps.confidential",
     "apps.payments",
     "apps.commerce",
     "apps.giftcards",
@@ -158,6 +159,14 @@ GOOGLE_OAUTH_VERIFY_AUDIENCE = _get_bool(
 )
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
+SEPOLIA_RPC_URL = os.environ.get("SEPOLIA_RPC_URL", "")
+ZAMA_CORE_CONTRACT_ADDRESS = os.environ.get("ZAMA_CORE_CONTRACT_ADDRESS", "").strip()
+ZAMA_CHAIN_ID = int(os.environ.get("ZAMA_CHAIN_ID", "11155111"))
+ZAMA_EXPLORER_BASE_URL = os.environ.get(
+    "ZAMA_EXPLORER_BASE_URL",
+    "https://sepolia.etherscan.io",
+).strip()
+ZAMA_NETWORK_NAME = os.environ.get("ZAMA_NETWORK_NAME", "Sepolia")
 WALLET_ENCRYPTION_KEY = os.environ.get("WALLET_ENCRYPTION_KEY", "")
 BALANCE_REFRESH_TTL_SECONDS = int(os.environ.get("BALANCE_REFRESH_TTL_SECONDS", "20"))
 BLOCKCHAIN_NETWORK = (

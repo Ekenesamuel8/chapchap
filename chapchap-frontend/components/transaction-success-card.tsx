@@ -18,7 +18,7 @@ export function TransactionSuccessCard({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/65 p-4 backdrop-blur-sm">
-      <div className="glass-panel edge-glow animate-float-up relative w-full max-w-md overflow-y-auto rounded-[2rem] border border-white/10 p-4 text-center max-h-[90vh] sm:p-6">
+      <div className="glass-panel edge-glow animate-float-up relative max-h-[90vh] w-full max-w-md overflow-y-auto rounded-[2rem] border border-white/10 p-4 text-center sm:p-6">
         <button
           type="button"
           onClick={onDone}
@@ -31,37 +31,28 @@ export function TransactionSuccessCard({
           <SuccessIcon className="size-8" />
         </div>
         <h3 className="mt-4 font-display text-2xl font-bold text-white sm:text-3xl">
-          {transaction.status === "scheduled"
-            ? "Payment Scheduled"
-            : "Transaction Successful"}
+          {getTransactionTitle(transaction.status)}
         </h3>
         <p className="mt-2 text-sm leading-6 text-white/[0.68]">
-          {transaction.amount} {transaction.asset} to {transaction.recipient}
+          {transaction.amount} {transaction.asset} for {transaction.recipient}
         </p>
 
         <div className="mt-5 rounded-[1.6rem] border border-white/10 bg-white/5 p-4 text-left">
           <DetailRow label="Recipient" value={transaction.recipient} />
           <DetailRow label="Network" value={transaction.network} />
-          <DetailRow
-            label={transaction.status === "scheduled" ? "Status" : "Tx hash"}
-            value={
-              transaction.status === "scheduled"
-                ? "Scheduled"
-                : shortenHash(transaction.txHash)
-            }
-          />
+          <DetailRow label="Tx hash" value={shortenHash(transaction.txHash)} />
           <DetailRow label="Timestamp" value={transaction.submittedAt} />
         </div>
 
         <div className="mt-5 grid gap-3">
-          {transaction.explorerUrl && transaction.status !== "scheduled" ? (
+          {transaction.explorerUrl ? (
             <a
               href={transaction.explorerUrl}
               target="_blank"
               rel="noreferrer"
               className="rounded-full bg-white px-4 py-3 font-semibold text-black"
             >
-              View on Explorer
+              View on Sepolia Etherscan
             </a>
           ) : null}
           <button
@@ -75,6 +66,12 @@ export function TransactionSuccessCard({
       </div>
     </div>
   );
+}
+
+function getTransactionTitle(status?: string) {
+  if (status === "scheduled") return "Payment Scheduled";
+  if (status === "confirmed") return "Transaction Confirmed";
+  return "Transaction Submitted";
 }
 
 function shortenHash(hash: string) {

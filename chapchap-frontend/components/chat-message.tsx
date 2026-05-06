@@ -1,15 +1,56 @@
-import { ChatItem } from "@/lib/types";
+"use client";
+
+import { FormEvent, useState } from "react";
+import { ChatItem, ConfidentialActionCard } from "@/lib/types";
 
 type ChatMessageProps = {
   message: ChatItem;
-  onOpenConfirmation?: (paymentIntentId: number) => void;
+  onPrepareAction?: (action: ConfidentialActionCard) => void;
+  onSelectTransferMode?: (
+    action: ConfidentialActionCard,
+    transferMode: "confidential" | "public",
+  ) => void;
+  onSubmitProof?: (
+    agreementId: number,
+    proofText: string,
+    proofLink?: string,
+  ) => Promise<void> | void;
 };
+
+const privacyNote =
+  "Sensitive values are encrypted where supported by Zama/FHEVM. Wallet addresses and transaction existence may still be public.";
 
 export function ChatMessage({
   message,
-  onOpenConfirmation,
+  onPrepareAction,
+  onSelectTransferMode,
+  onSubmitProof,
 }: ChatMessageProps) {
   const isUser = message.kind === "user_message";
+  const [proofText, setProofText] = useState("");
+  const [proofLink, setProofLink] = useState("");
+  const [agreementIdInput, setAgreementIdInput] = useState(
+    message.kind === "proof_submission_card" && message.agreementId
+      ? String(message.agreementId)
+      : "",
+  );
+  const [isSubmittingProof, setSubmittingProof] = useState(false);
+
+  const handleProofSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (message.kind !== "proof_submission_card" || !proofText.trim()) return;
+    const agreementId = Number(agreementIdInput);
+    if (!Number.isFinite(agreementId) || agreementId <= 0) return;
+
+    setSubmittingProof(true);
+    try {
+      await onSubmitProof?.(agreementId, proofText.trim(), proofLink.trim() || undefined);
+      setProofText("");
+      setProofLink("");
+    } finally {
+      setSubmittingProof(false);
+    }
+  };
 
   return (
     <div
@@ -35,163 +76,213 @@ export function ChatMessage({
 
         {"text" in message && message.text ? (
           <div
-            className={`rounded-[1.5rem] px-2 py-1 sm:px-4 sm:py-3 text-[12px] leading-7 ${
+            className={`rounded-[1.5rem] px-2 py-1 text-[12px] leading-7 sm:px-4 sm:py-3 ${
               isUser
                 ? "purple-ring bg-white/[0.08] text-white"
                 : message.kind === "system_error"
                   ? "border border-rose-400/20 bg-rose-500/10 text-rose-100"
                   : message.kind === "assistant_followup"
                     ? "border border-accent-soft/25 bg-accent-soft/10 text-white"
-                  : "glass-panel text-white/[0.78]"
+                    : "glass-panel text-white/[0.78]"
             }`}
           >
             {message.text}
           </div>
         ) : null}
 
-        {message.kind === "payment_confirmation_card" ? (
+        {message.kind === "confidential_action_card" ? (
           <div className="glass-panel edge-glow mt-3 rounded-[1.6rem] border border-accent-soft/20 p-4">
             <p className="font-display text-lg font-semibold text-white">
-              Review transaction
+              {getCardTitle(message.action.intent)}
             </p>
-            <p className="mt-2 text-sm leading-6 text-white/[0.68]">
-              {message.summary.amount} {message.summary.token_symbol} to{" "}
-              {message.summary.recipient_name ?? "recipient"} on{" "}
-              {message.summary.network}.
+            <div className="mt-3 grid gap-2 text-sm text-white/[0.72]">
+              {message.action.intent === "confidential_payment" ? (
+                <>
+                  <DetailRow label="Recipient" value={message.action.recipientName ?? "Not specified"} />
+                  <DetailRow label="Recipient address" value={message.action.recipientAddress ?? "Required before continuing"} />
+                  <DetailRow label="Amount" value={message.action.amount ?? "Not specified"} />
+                  <DetailRow label="Asset" value={message.action.asset} />
+                  <DetailRow
+                    label="Transfer mode"
+                    value={
+                      message.action.transferMode === "confidential"
+                        ? "Confidential"
+                        : message.action.transferMode === "public"
+                          ? "Public"
+                          : "Choose private or public"
+                    }
+                  />
+                  <DetailRow
+                    label="Recipient outcome"
+                    value={
+                      message.action.transferMode === "public"
+                        ? "Recipient will receive normal Sepolia ETH in their wallet."
+                        : "Recipient will receive funds inside ChapChap private balance."
+                    }
+                  />
+                </>
+              ) : null}
+
+              {message.action.intent === "public_payment" ? (
+                <>
+                  <DetailRow label="Recipient" value={message.action.recipientName ?? "Not specified"} />
+                  <DetailRow label="Recipient address" value={message.action.recipientAddress ?? "Required before continuing"} />
+                  <DetailRow label="Amount" value={message.action.amount ?? "Not specified"} />
+                  <DetailRow label="Asset" value={message.action.asset} />
+                  <DetailRow label="Transfer mode" value="Public" />
+                  <DetailRow
+                    label="Recipient outcome"
+                    value="Recipient will receive normal Sepolia ETH in their wallet."
+                  />
+                </>
+              ) : null}
+
+              {message.action.intent === "confidential_savings" ? (
+                <>
+                  <DetailRow label="Amount" value={message.action.amount ?? "Not specified"} />
+                  <DetailRow label="Asset" value={message.action.asset} />
+                  <DetailRow label="Lock rule" value={message.action.lockRule ?? "Flexible"} />
+                  <DetailRow
+                    label="Unlocks on"
+                    value={
+                      message.action.unlockAt
+                        ? new Date(message.action.unlockAt).toLocaleString()
+                        : "Not specified yet"
+                    }
+                  />
+                </>
+              ) : null}
+
+              {message.action.intent === "confidential_agreement" ? (
+                <>
+                  <DetailRow label="Recipient" value={message.action.recipientName ?? "Not specified"} />
+                  <DetailRow label="Recipient address" value={message.action.recipientAddress ?? "Required before continuing"} />
+                  <DetailRow label="Amount" value={message.action.amount ?? "Not specified yet"} />
+                  <DetailRow label="Condition" value={message.action.condition ?? "Not specified"} />
+                  <DetailRow label="Deadline" value={message.action.deadline ? new Date(message.action.deadline).toLocaleString() : "Not specified"} />
+                  <DetailRow label="Proof required" value="Yes, proof may be submitted for AI-assisted review." />
+                </>
+              ) : null}
+            </div>
+
+            <p className="mt-3 text-xs leading-6 text-white/[0.55]">
+              {privacyNote}
             </p>
+
+            {message.action.missingFields.includes("transfer_mode") ? (
+              <div className="mt-4 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => onSelectTransferMode?.(message.action, "confidential")}
+                  className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-semibold text-white"
+                >
+                  Choose Confidential
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSelectTransferMode?.(message.action, "public")}
+                  className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-semibold text-white"
+                >
+                  Choose Public
+                </button>
+              </div>
+            ) : null}
+
             <button
               type="button"
-              onClick={() => onOpenConfirmation?.(message.paymentIntentId)}
+              onClick={() => onPrepareAction?.(message.action)}
+              disabled={message.action.missingFields.includes("transfer_mode")}
               className="mt-4 rounded-full bg-white px-4 py-2 text-sm font-semibold text-black"
             >
-              Open confirmation
+              {message.action.intent === "confidential_agreement"
+                ? "Create Agreement"
+                : message.action.intent === "public_payment"
+                  ? "Send Public ETH"
+                : "Continue"}
             </button>
           </div>
         ) : null}
 
-        {message.kind === "product_results" ? (
-          <div className="mt-3 grid gap-3">
-            {message.results.map((result, index) => (
-              <div
-                key={`${result.title}-${result.merchant_name}-${index}`}
-                className="glass-panel edge-glow rounded-[1.4rem] border border-white/10 p-4"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="font-display text-base font-semibold text-white">
-                      {result.title}
-                    </p>
-                    <p className="mt-1 text-sm text-white/[0.58]">
-                      {result.merchant_name}
-                    </p>
-                  </div>
-                  <span className="rounded-full border border-accent-soft/30 bg-accent-soft/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-accent-soft">
-                    {result.tag}
-                  </span>
-                </div>
-                <a
-                  href={result.product_url || "#"}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-4 inline-flex rounded-full border border-white/10 bg-white/[0.05] px-3 py-2 text-xs font-semibold text-white/[0.84]"
-                >
-                  View Product
-                </a>
-              </div>
-            ))}
-          </div>
-        ) : null}
-
-        {message.kind === "swap_preview_card" ? (
-          <div className="glass-panel edge-glow mt-3 rounded-[1.6rem] border border-cyan-400/20 p-4">
+        {message.kind === "proof_submission_card" ? (
+          <form
+            onSubmit={handleProofSubmit}
+            className="glass-panel edge-glow mt-3 rounded-[1.6rem] border border-cyan-400/20 p-4"
+          >
             <p className="font-display text-lg font-semibold text-white">
-              Review swap preview
+              Submit proof
             </p>
-            <div className="mt-3 grid gap-2 text-sm text-white/[0.72]">
-              <p>
-                <span className="font-semibold text-white">Swap in:</span>{" "}
-                {message.preview.amount_in} {message.preview.source_token}
-              </p>
-              <p>
-                <span className="font-semibold text-white">Estimated out:</span>{" "}
-                {message.preview.estimated_output} {message.preview.destination_token}
-              </p>
-              <p>
-                <span className="font-semibold text-white">Network:</span>{" "}
-                {message.preview.network}
-              </p>
-              <p>
-                <span className="font-semibold text-white">Estimated fee:</span>{" "}
-                {message.preview.estimated_fee_xtz} XTZ
-              </p>
-            </div>
-            <p className="mt-3 text-xs leading-6 text-white/[0.55]">
-              {message.preview.slippage_note}
+            <p className="mt-2 text-sm leading-6 text-white/[0.68]">
+              Add the evidence you want reviewed for your agreement. This verdict stays offchain for now.
             </p>
-          </div>
+            <input
+              value={agreementIdInput}
+              onChange={(event) => setAgreementIdInput(event.target.value)}
+              placeholder="Agreement record ID"
+              className="mt-4 w-full rounded-[1.3rem] border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none placeholder:text-white/[0.28]"
+            />
+            <textarea
+              value={proofText}
+              onChange={(event) => setProofText(event.target.value)}
+              placeholder="Explain what was delivered, missed, or disputed."
+              className="mt-4 min-h-28 w-full rounded-[1.3rem] border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none placeholder:text-white/[0.28]"
+            />
+            <input
+              value={proofLink}
+              onChange={(event) => setProofLink(event.target.value)}
+              placeholder="Optional proof link"
+              className="mt-3 w-full rounded-[1.3rem] border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none placeholder:text-white/[0.28]"
+            />
+            <button
+              type="submit"
+              disabled={!proofText.trim() || !agreementIdInput.trim() || isSubmittingProof}
+              className="mt-4 rounded-full bg-white px-4 py-2 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSubmittingProof ? "Reviewing..." : "Run AI verdict"}
+            </button>
+          </form>
         ) : null}
 
-        {message.kind === "savings_result_card" ? (
+        {message.kind === "proof_result_card" ? (
           <div className="glass-panel edge-glow mt-3 rounded-[1.6rem] border border-emerald-400/20 p-4">
             <p className="font-display text-lg font-semibold text-white">
-              Savings position ready
+              AI-assisted verdict
             </p>
             <div className="mt-3 grid gap-2 text-sm text-white/[0.72]">
-              <p>
-                <span className="font-semibold text-white">Amount:</span>{" "}
-                {message.savings.amount} {message.savings.asset}
-              </p>
-              <p>
-                <span className="font-semibold text-white">Strategy:</span>{" "}
-                {message.savings.strategy_name}
-              </p>
-              <p>
-                <span className="font-semibold text-white">APY:</span>{" "}
-                {message.savings.apy_estimate}%
-              </p>
+              <DetailRow label="Recommendation" value={message.recommendation} />
+              <DetailRow label="Confidence" value={`${Math.round(message.confidence * 100)}%`} />
+              <DetailRow label="Reasoning" value={message.reasoning} />
             </div>
             <p className="mt-3 text-xs leading-6 text-white/[0.55]">
-              {message.savings.mode === "demo"
-                ? "Demo mode is active until a live savings integration is added."
-                : "Live savings mode."}
+              This is an AI-assisted recommendation only. Final settlement logic will be added in a later step.
             </p>
-          </div>
-        ) : null}
-
-        {message.kind === "giftcard_results" ? (
-          <div className="mt-3 grid gap-3">
-            {message.results.map((result, index) => (
-              <div
-                key={`${result.brand}-${result.title}-${index}`}
-                className="glass-panel edge-glow rounded-[1.4rem] border border-white/10 p-4"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="font-display text-base font-semibold text-white">
-                      {result.title}
-                    </p>
-                    <p className="mt-1 text-sm text-white/[0.58]">
-                      {result.country} • {result.denomination}
-                    </p>
-                  </div>
-                  <span className="rounded-full border border-accent-soft/30 bg-accent-soft/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-accent-soft">
-                    {result.mode}
-                  </span>
-                </div>
-                <p className="mt-3 text-sm text-white/[0.62]">
-                  {result.availability}
-                </p>
-                <button
-                  type="button"
-                  className="mt-4 rounded-full border border-white/10 bg-white/[0.05] px-3 py-2 text-xs font-semibold text-white/[0.84]"
-                >
-                  {result.cta_label}
-                </button>
-              </div>
-            ))}
           </div>
         ) : null}
       </div>
     </div>
   );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <p>
+      <span className="font-semibold text-white">{label}:</span> {value}
+    </p>
+  );
+}
+
+function getCardTitle(intent: ConfidentialActionCard["intent"]) {
+  switch (intent) {
+    case "confidential_payment":
+      return "Confidential payment";
+    case "public_payment":
+      return "Public payment";
+    case "confidential_savings":
+      return "Confidential savings";
+    case "confidential_agreement":
+      return "Confidential agreement";
+    case "proof_submission":
+      return "Proof submission";
+    default:
+      return "Confidential action";
+  }
 }

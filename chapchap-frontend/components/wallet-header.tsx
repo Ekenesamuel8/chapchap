@@ -7,8 +7,12 @@ type WalletHeaderProps = {
   address: string;
   savings: string;
   networkLabel: string;
+  connectedAddress: string | null;
+  isWalletConnecting: boolean;
   onCopy: () => void;
   onFundWallet: () => void;
+  onConnectWallet: () => void;
+  onDisconnectWallet: () => void;
 };
 
 export function WalletHeader({
@@ -16,8 +20,12 @@ export function WalletHeader({
   address,
   savings,
   networkLabel,
+  connectedAddress,
+  isWalletConnecting,
   onCopy,
   onFundWallet,
+  onConnectWallet,
+  onDisconnectWallet,
 }: WalletHeaderProps) {
   return (
     <section className="text-center">
@@ -42,11 +50,22 @@ export function WalletHeader({
         <button
           type="button"
           onClick={onFundWallet}
-          className="rounded-full border border-white/10 bg-white/5 px-1.5 py-1 text-xs sm:text-sm sm:px-5 sm:py-3 text-white"
+          className="rounded-full border border-white/10 bg-white/5 px-1.5 py-1 text-xs text-white sm:px-5 sm:py-3 sm:text-sm"
         >
-          Fund Wallet
+          Receive Address
         </button>
-        <div className="rounded-full border border-white/10 bg-white/5 px-2 py-1 sm:px-4 sm:py-3 text-xs sm:text-sm text-white/[0.7]">
+        <button
+          type="button"
+          onClick={connectedAddress ? onDisconnectWallet : onConnectWallet}
+          className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/[0.92] sm:px-4 sm:py-3 sm:text-sm"
+        >
+          {isWalletConnecting
+            ? "Connecting..."
+            : connectedAddress
+              ? "Disconnect Wallet"
+              : "Connect MetaMask"}
+        </button>
+        <div className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/[0.7] sm:px-4 sm:py-3 sm:text-sm">
           {networkLabel}
         </div>
       </div>

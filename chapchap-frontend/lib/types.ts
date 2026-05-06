@@ -280,6 +280,118 @@ export type SubmittedTransactionView = {
   status?: string;
 };
 
+export type ConfidentialIntent =
+  | "confidential_payment"
+  | "public_payment"
+  | "confidential_savings"
+  | "confidential_agreement"
+  | "proof_submission"
+  | "general_help";
+
+export type ConfidentialActionStatus =
+  | "draft"
+  | "awaiting_wallet"
+  | "submitted"
+  | "confirmed"
+  | "failed"
+  | "reviewed";
+
+export type ConfidentialParsePayload = {
+  action_id: number | null;
+  intent: ConfidentialIntent;
+  confidence: number;
+  missing_fields: string[];
+  public_summary: string;
+  payload: Record<string, unknown>;
+  agreement_record_id?: number;
+  savings_position_id?: number;
+};
+
+export type ConfidentialChatSession = {
+  messages: ChatItem[];
+  pendingAction:
+    | {
+        field: "recipient_address" | "amount" | "transfer_mode";
+        action: ConfidentialActionCard;
+      }
+    | null;
+  submittedTransaction: SubmittedTransactionView | null;
+};
+
+export type ConfidentialHistoryItem = {
+  type: ConfidentialIntent;
+  status: ConfidentialActionStatus;
+  public_summary: string;
+  tx_hash: string | null;
+  contract_address: string | null;
+  network: string;
+  created_at: string;
+};
+
+export type ConfidentialProofResponse = {
+  agreement_id: number;
+  recommendation: "release" | "refund" | "dispute";
+  confidence: number;
+  reasoning: string;
+};
+
+export type ConfidentialTxRecordResponse = {
+  action_id: number;
+  status: ConfidentialActionStatus;
+  tx_hash: string | null;
+  contract_address: string | null;
+  network: string;
+};
+
+export type ConfidentialSavingsStatus =
+  | "active"
+  | "withdrawable"
+  | "withdrawn"
+  | "failed";
+
+export type ConfidentialSavingsPosition = {
+  id: number;
+  amount_display: string;
+  asset: string;
+  lock_rule: string | null;
+  unlock_at: string | null;
+  status: ConfidentialSavingsStatus;
+  tx_hash: string | null;
+  withdraw_tx_hash: string | null;
+  withdrawn_at: string | null;
+  created_at: string;
+};
+
+export type ConfidentialSavingsWithdrawResponse = {
+  id: number;
+  amount_display: string;
+  asset: string;
+  unlock_at: string | null;
+  status: ConfidentialSavingsStatus;
+  tx_hash: string | null;
+  withdraw_tx_hash: string | null;
+  message: string;
+  withdrawal_contract_ready: boolean;
+};
+
+export type ConfidentialActionCard = {
+  actionId: number;
+  intent: ConfidentialIntent;
+  publicSummary: string;
+  missingFields: string[];
+  recipientName: string | null;
+  recipientAddress: string | null;
+  amount: string | null;
+  asset: string;
+  lockRule: string | null;
+  unlockAt: string | null;
+  condition: string | null;
+  deadline: string | null;
+  metadataHash: string | null;
+  agreementRecordId: number | null;
+  transferMode: "confidential" | "public" | "unspecified" | null;
+};
+
 export type ChatItem =
   | {
       id: string;
@@ -299,32 +411,23 @@ export type ChatItem =
     }
   | {
       id: string;
-      kind: "payment_confirmation_card";
-      paymentIntentId: number;
-      summary: PaymentConfirmationSummary;
-    }
-  | {
-      id: string;
-      kind: "product_results";
-      results: ProductResultItem[];
-    }
-  | {
-      id: string;
-      kind: "swap_preview_card";
-      preview: SwapPreview;
-    }
-  | {
-      id: string;
-      kind: "savings_result_card";
-      savings: SavingsResult;
-    }
-  | {
-      id: string;
-      kind: "giftcard_results";
-      results: GiftCardResultItem[];
-    }
-  | {
-      id: string;
       kind: "system_error";
       text: string;
+    }
+  | {
+      id: string;
+      kind: "confidential_action_card";
+      action: ConfidentialActionCard;
+    }
+  | {
+      id: string;
+      kind: "proof_submission_card";
+      agreementId?: number | null;
+    }
+  | {
+      id: string;
+      kind: "proof_result_card";
+      recommendation: "release" | "refund" | "dispute";
+      confidence: number;
+      reasoning: string;
     };

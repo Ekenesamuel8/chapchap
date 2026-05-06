@@ -1,5 +1,17 @@
 node_modules/
+**/node_modules/
 artifacts/
+**/artifacts/
 cache/
+**/cache/
 typechain-types/
 .env
+**/.env
+**/.env.local
+**/.env.*.local
+**/.next/
+**/*.tsbuildinfo
+**/__pycache__/
+**/.venv/
+contracts-zama/fhevmTemp/
+chapchap-backend/backend/data.json

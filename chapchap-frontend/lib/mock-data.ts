@@ -37,8 +37,8 @@ export const recentTransactions: TransactionRecord[] = [
   {
     id: "tx-3",
     type: "swap",
-    title: "XTZ to USDC",
-    subtitle: "Wallet balance top up",
+    title: "ETH to savings",
+    subtitle: "Confidential deposit",
     amount: "$45.00",
     time: "Yesterday, 7:45 PM",
     status: "success",

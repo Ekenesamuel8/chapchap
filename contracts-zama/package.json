@@ -1,0 +1,21 @@
+{
+  "name": "chapchap-contracts-zama",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Zama FHEVM Sepolia workspace for ChapChap Confidential",
+  "scripts": {
+    "compile": "hardhat compile",
+    "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia"
+  },
+  "devDependencies": {
+    "@fhevm/hardhat-plugin": "^0.4.2",
+    "@fhevm/mock-utils": "0.4.2",
+    "@fhevm/solidity": "^0.11.1",
+    "@nomicfoundation/hardhat-ethers": "^3.1.3",
+    "@zama-fhe/relayer-sdk": "0.4.1",
+    "dotenv": "^16.6.1",
+    "encrypted-types": "^0.0.4",
+    "ethers": "^6.16.0",
+    "hardhat": "^2.24.1"
+  }
+}

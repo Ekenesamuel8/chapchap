@@ -12,6 +12,8 @@ import {
 import { fetchMe, loginWithGoogleIdToken as requestGoogleLogin } from "@/lib/api/auth";
 import {
   clearAuthToken,
+  clearStoredChatSession,
+  clearStoredDashboard,
   clearStoredUser,
   getAuthToken,
   getStoredUser,
@@ -57,6 +59,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const logout = useCallback(() => {
     clearAuthToken();
     clearStoredUser();
+    clearStoredDashboard();
+    clearStoredChatSession();
     setTokenState(null);
     setUser(null);
   }, []);

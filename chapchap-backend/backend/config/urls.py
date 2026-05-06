@@ -10,6 +10,7 @@ urlpatterns = [
     path("api/health/", HealthCheckView.as_view(), name="health-check"),
     path("api/auth/", include("apps.authn.urls")),
     path("api/agent/", include("apps.ai_agent.urls")),
+    path("api/confidential/", include("apps.confidential.urls")),
     path("api/payments/", include("apps.payments.urls")),
     path("api/history/", TransactionHistoryView.as_view(), name="history"),
     path("api/", include("apps.users.urls")),

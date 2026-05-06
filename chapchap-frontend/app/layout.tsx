@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Manrope, Space_Grotesk } from "next/font/google";
 import { AuthProvider } from "@/components/providers/auth-provider";
+import { ThemeProvider } from "@/components/providers/theme-provider";
+import { WalletProvider } from "@/components/providers/wallet-provider";
 import "./globals.css";
 
 const manrope = Manrope({
@@ -15,8 +17,8 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "ChapChap",
-  description: "Your AI wallet for payments, shopping, and digital purchases.",
+  title: "ChapChap Confidential",
+  description: "AI-powered private payments, savings, and agreements on Sepolia.",
 };
 
 export default function RootLayout({
@@ -30,7 +32,11 @@ export default function RootLayout({
       className={`${manrope.variable} ${spaceGrotesk.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <AuthProvider>{children}</AuthProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <WalletProvider>{children}</WalletProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

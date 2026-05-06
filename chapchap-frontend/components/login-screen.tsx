@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { GoogleIcon } from "@/components/icons";
 import { useAuth } from "@/components/providers/auth-provider";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const GOOGLE_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
@@ -32,7 +33,6 @@ type GoogleAccountsId = {
       logo_alignment?: "left" | "center";
     },
   ) => void;
-  prompt: () => void;
 };
 
 declare global {
@@ -45,11 +45,35 @@ declare global {
   }
 }
 
+const FEATURE_SECTIONS = [
+  {
+    title: "Confidential Payments",
+    body: "Send encrypted-value transfers through ChapChap so recipients receive funds inside the private contract balance instead of normal wallet ETH.",
+  },
+  {
+    title: "Private Savings",
+    body: "Deposit on Sepolia, move value into a private ChapChap savings bucket, and reveal balances only to the connected wallet owner.",
+  },
+  {
+    title: "AI Agreement Escrow",
+    body: "Turn plain English into agreement drafts, attach proof later, and use AI-assisted verdict recommendations before settlement.",
+  },
+  {
+    title: "Public or Private Transfers",
+    body: "Choose whether a payment should go through ChapChap confidential balance flow or normal public Sepolia ETH delivery.",
+  },
+  {
+    title: "Why Zama",
+    body: "Zama/FHEVM lets ChapChap compute over encrypted values where supported, while wallet addresses and transaction existence may still remain public.",
+  },
+];
+
 export function LoginScreen() {
   const router = useRouter();
   const { hydrated, isAuthenticated, loginWithDevToken, loginWithGoogleIdToken } =
     useAuth();
   const buttonContainerRef = useRef<HTMLDivElement | null>(null);
+  const launchSectionRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setSubmitting] = useState(false);
   const [isGoogleReady, setGoogleReady] = useState(false);
@@ -164,90 +188,213 @@ export function LoginScreen() {
     }
   };
 
+  const handleLaunchClick = () => {
+    if (isAuthenticated) {
+      router.push("/dashboard");
+      return;
+    }
+    launchSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   return (
-    <main className="relative min-h-screen overflow-hidden px-6 py-10">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,rgba(118,87,246,0.18),transparent_22rem)]" />
-      <div className="absolute inset-x-0 bottom-0 h-72 bg-[radial-gradient(circle_at_bottom,rgba(240,152,115,0.18),transparent_65%)]" />
+    <main className="relative min-h-screen overflow-hidden bg-background text-white">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_15%,rgba(118,87,246,0.28),transparent_28rem)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_10%,rgba(240,152,115,0.12),transparent_24rem)]" />
+      <div className="absolute inset-x-0 bottom-0 h-80 bg-[radial-gradient(circle_at_bottom,rgba(118,87,246,0.18),transparent_62%)]" />
 
-      <div className="relative mx-auto flex min-h-[calc(100vh-5rem)] max-w-6xl items-center justify-center">
-        <section className="glass-panel edge-glow w-full max-w-md rounded-[2.5rem] border border-white/10 px-6 py-10 text-center sm:px-8 sm:py-12">
-          <div className="mx-auto mb-14 flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-[2rem] border border-white/10 bg-white/5 text-4xl text-white shadow-[0_0_60px_rgba(118,87,246,0.22)]">
-            C
-          </div>
-
-          <h1 className="font-display text-5xl font-bold tracking-tight text-white sm:text-6xl">
-            Chap Chap
-          </h1>
-          <p className="mx-auto mt-5 max-w-sm text-base leading-8 text-white/[0.62]">
-            Your AI wallet for payments, shopping, and digital purchases.
-          </p>
-          <p className="mx-auto mt-3 max-w-xs text-sm leading-7 text-white/[0.48]">
-            Sign in once and let ChapChap turn plain-language requests into
-            secure, reviewable wallet actions.
-          </p>
-
-          <div className="mt-12 rounded-[2rem] border border-white/10 bg-white/[0.03] px-5 py-6">
-            <div className="mb-4 flex items-center justify-center gap-3 text-white">
-              <GoogleIcon className="size-5" />
-              <span className="text-sm font-medium text-white/[0.7]">
-                Continue with Google
-              </span>
+      <div className="relative mx-auto max-w-6xl px-6 py-8 sm:px-8">
+        <header className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="grid size-11 place-items-center rounded-2xl border border-white/10 bg-white/[0.05] text-lg font-bold text-white shadow-[0_0_60px_rgba(118,87,246,0.18)]">
+              C
             </div>
-
-            <div className="flex justify-center">
-              <div ref={buttonContainerRef} className="min-h-11" />
-            </div>
-
-            {!isGoogleReady && !error ? (
-              <p className="mt-4 text-sm text-white/[0.45]">
-                Loading secure Google sign-in...
+            <div>
+              <p className="font-display text-lg font-semibold">ChapChap Confidential</p>
+              <p className="text-xs uppercase tracking-[0.26em] text-white/[0.42]">
+                Sepolia + Zama/FHEVM
               </p>
-            ) : null}
+            </div>
           </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <ThemeToggle />
+            <button
+              type="button"
+              onClick={handleLaunchClick}
+              className="rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black"
+            >
+              Launch App
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                document.getElementById("demo-flow")?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "start",
+                })
+              }
+              className="rounded-full border border-white/10 bg-white/[0.05] px-5 py-2.5 text-sm font-semibold text-white"
+            >
+              View Demo Flow
+            </button>
+          </div>
+        </header>
 
-          {error ? (
-            <p className="mt-5 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-              {error}
+        <section className="grid gap-8 pb-14 pt-14 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
+          <div>
+            <p className="text-sm uppercase tracking-[0.28em] text-accent-soft">
+              AI-powered private payments, savings, and agreements.
             </p>
-          ) : (
-            <p className="mt-5 text-sm text-white/[0.45]">
-              Your wallet profile and dashboard will load automatically after
-              sign-in.
+            <h1 className="mt-5 max-w-3xl font-display text-5xl font-bold tracking-tight text-white sm:text-6xl lg:text-7xl">
+              ChapChap Confidential
+            </h1>
+            <p className="mt-6 max-w-2xl text-lg leading-8 text-white/[0.68]">
+              Send, save, and settle agreements on Sepolia with confidential logic powered by Zama/FHEVM.
             </p>
-          )}
+            <p className="mt-4 max-w-2xl text-sm leading-7 text-white/[0.52]">
+              Wallet addresses and transaction existence may still be public, but sensitive values can be encrypted where supported by Zama/FHEVM.
+            </p>
 
-          {ENABLE_DEV_AUTH ? (
-            <div className="mt-6 text-left">
+            <div className="mt-8 flex flex-wrap gap-4">
               <button
                 type="button"
-                onClick={() => setShowDevPanel((current) => !current)}
-                className="text-xs uppercase tracking-[0.24em] text-white/[0.35]"
+                onClick={handleLaunchClick}
+                className="rounded-full bg-white px-6 py-3 text-sm font-semibold text-black"
               >
-                {showDevPanel ? "Hide developer tools" : "Developer tools"}
+                Launch ChapChap
               </button>
+              <button
+                type="button"
+                onClick={() =>
+                  document.getElementById("demo-flow")?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                  })
+                }
+                className="rounded-full border border-white/10 bg-white/[0.05] px-6 py-3 text-sm font-semibold text-white"
+              >
+                View Demo Flow
+              </button>
+            </div>
+          </div>
 
-              {showDevPanel ? (
-                <form onSubmit={handleDevTokenSubmit} className="mt-4 space-y-4">
-                  <label className="block text-sm text-white/[0.62]">
-                    DRF auth token
-                    <input
-                      value={devToken}
-                      onChange={(event) => setDevToken(event.target.value)}
-                      placeholder="Paste a backend token for local development."
-                      className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none placeholder:text-white/[0.28]"
-                    />
-                  </label>
-                  <button
-                    type="submit"
-                    disabled={isSubmitting || !devToken.trim()}
-                    className="w-full rounded-2xl border border-white/10 bg-white/[0.05] px-6 py-4 text-base font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Continue with dev token
-                  </button>
-                </form>
+          <div className="glass-panel edge-glow rounded-[2.4rem] border border-white/10 p-6 sm:p-8">
+            <div className="grid gap-4">
+              <div className="rounded-[1.6rem] border border-white/10 bg-white/[0.04] p-5">
+                <p className="text-xs uppercase tracking-[0.24em] text-white/[0.4]">
+                  Confidential flow
+                </p>
+                <p className="mt-3 text-lg font-semibold text-white">
+                  Private transfer
+                </p>
+                <p className="mt-2 text-sm leading-7 text-white/[0.62]">
+                  Encrypt the value client-side, move it through ChapChap private balance, and let the recipient reveal it only after connecting the same wallet.
+                </p>
+              </div>
+              <div className="rounded-[1.6rem] border border-white/10 bg-gradient-to-br from-accent/20 to-accent-soft/10 p-5">
+                <p className="text-xs uppercase tracking-[0.24em] text-white/[0.4]">
+                  Public option
+                </p>
+                <p className="mt-3 text-lg font-semibold text-white">
+                  Normal Sepolia ETH
+                </p>
+                <p className="mt-2 text-sm leading-7 text-white/[0.62]">
+                  Use a direct wallet transfer when the receiver should see funds in MetaMask immediately.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="demo-flow" className="grid gap-5 py-6 md:grid-cols-2 xl:grid-cols-5">
+          {FEATURE_SECTIONS.map((section) => (
+            <article
+              key={section.title}
+              className="glass-panel edge-glow rounded-[1.9rem] border border-white/10 p-5"
+            >
+              <p className="font-display text-xl font-semibold text-white">
+                {section.title}
+              </p>
+              <p className="mt-3 text-sm leading-7 text-white/[0.62]">
+                {section.body}
+              </p>
+            </article>
+          ))}
+        </section>
+
+        <section ref={launchSectionRef} className="py-12">
+          <div className="glass-panel edge-glow mx-auto max-w-xl rounded-[2.5rem] border border-white/10 px-6 py-8 text-center sm:px-8">
+            <p className="text-sm uppercase tracking-[0.28em] text-white/[0.42]">
+              Launch ChapChap
+            </p>
+            <h2 className="mt-3 font-display text-4xl font-bold tracking-tight text-white">
+              Sign in to open the dashboard
+            </h2>
+            <p className="mx-auto mt-4 max-w-md text-sm leading-7 text-white/[0.58]">
+              Continue with Google to access the Assistant, connect MetaMask on Sepolia, reveal ChapChap private balances, and run confidential contract actions.
+            </p>
+
+            <div className="mt-8 rounded-[2rem] border border-white/10 bg-white/[0.03] px-5 py-6">
+              <div className="mb-4 flex items-center justify-center gap-3 text-white">
+                <GoogleIcon className="size-5" />
+                <span className="text-sm font-medium text-white/[0.7]">
+                  Continue with Google
+                </span>
+              </div>
+
+              <div className="flex justify-center">
+                <div ref={buttonContainerRef} className="min-h-11" />
+              </div>
+
+              {!isGoogleReady && !error ? (
+                <p className="mt-4 text-sm text-white/[0.45]">
+                  Loading secure Google sign-in...
+                </p>
               ) : null}
             </div>
-          ) : null}
+
+            {error ? (
+              <p className="mt-5 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                {error}
+              </p>
+            ) : (
+              <p className="mt-5 text-sm text-white/[0.45]">
+                After sign-in, the dashboard opens at <span className="font-semibold text-white">/dashboard</span>.
+              </p>
+            )}
+
+            {ENABLE_DEV_AUTH ? (
+              <div className="mt-6 text-left">
+                <button
+                  type="button"
+                  onClick={() => setShowDevPanel((current) => !current)}
+                  className="text-xs uppercase tracking-[0.24em] text-white/[0.35]"
+                >
+                  {showDevPanel ? "Hide developer tools" : "Developer tools"}
+                </button>
+
+                {showDevPanel ? (
+                  <form onSubmit={handleDevTokenSubmit} className="mt-4 space-y-4">
+                    <label className="block text-sm text-white/[0.62]">
+                      DRF auth token
+                      <input
+                        value={devToken}
+                        onChange={(event) => setDevToken(event.target.value)}
+                        placeholder="Paste a backend token for local development."
+                        className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none placeholder:text-white/[0.28]"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      disabled={isSubmitting || !devToken.trim()}
+                      className="w-full rounded-2xl border border-white/10 bg-white/[0.05] px-6 py-4 text-base font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Continue with dev token
+                    </button>
+                  </form>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         </section>
       </div>
     </main>

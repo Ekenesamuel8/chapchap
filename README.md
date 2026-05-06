@@ -1,4 +1,47 @@
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/5e32d78e-bfde-4c43-8e71-4bb573282520" /># ChapChap
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/5e32d78e-bfde-4c43-8e71-4bb573282520" />
+
+# ChapChap
+
+## ChapChap Confidential
+
+ChapChap Confidential is the current Zama Builder Track version of the project. It pivots the original conversational wallet into an AI-powered private payments, savings, and agreements assistant on Sepolia with Zama/FHEVM-compatible flows.
+
+Current confidential highlights:
+
+- confidential transfers that update private ChapChap balances inside the contract
+- public or confidential Sepolia ETH transfer choice
+- private savings deposits with explicit unlock and withdraw UX
+- AI-parsed agreement drafts plus proof review recommendations
+- MetaMask + Sepolia frontend flow with Zama relayer-based encrypted inputs
+
+Important privacy wording:
+
+- wallet addresses and transaction existence may still be public
+- sensitive values can be encrypted where supported by Zama/FHEVM
+- agreement escrow amounts are still public in the current MVP unless explicitly moved into a confidential contract path later
+
+## Zama / Sepolia setup
+
+Frontend example variables:
+
+```env
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=your_google_client_id
+NEXT_PUBLIC_ZAMA_CORE_CONTRACT_ADDRESS=0xYOUR_DEPLOYED_CONTRACT
+NEXT_PUBLIC_ZAMA_CHAIN_ID=11155111
+NEXT_PUBLIC_ZAMA_EXPLORER_BASE_URL=https://sepolia.etherscan.io
+```
+
+Backend example variables:
+
+```env
+SEPOLIA_RPC_URL=https://your-sepolia-rpc
+ZAMA_CORE_CONTRACT_ADDRESS=0xYOUR_DEPLOYED_CONTRACT
+ZAMA_CHAIN_ID=11155111
+ZAMA_EXPLORER_BASE_URL=https://sepolia.etherscan.io
+```
+
+Use placeholders or safe public contract addresses only. Do not commit private keys or live secret values.
 
 ChapChap is an AI-powered wallet assistant built for Tezos EVM on Etherlink. It helps users interact with crypto through natural language instead of complex wallet interfaces, making common actions like funding a wallet, sending assets, reviewing transactions, and exploring adjacent product flows more approachable for everyday users. The project combines conversational AI, a mobile-first frontend, a Django backend, and real Etherlink testnet integration to create a beginner-friendly onchain experience.
 

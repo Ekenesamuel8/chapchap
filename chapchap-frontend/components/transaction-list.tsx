@@ -1,17 +1,18 @@
 "use client";
 
-import { TransactionHistoryItem } from "@/lib/types";
+import { ConfidentialHistoryItem } from "@/lib/types";
 
 type TransactionListProps = {
-  transactions: TransactionHistoryItem[];
+  transactions: ConfidentialHistoryItem[];
 };
 
-const statusClasses: Record<TransactionHistoryItem["status"], string> = {
+const statusClasses: Record<ConfidentialHistoryItem["status"], string> = {
   confirmed: "bg-emerald-400/15 text-emerald-300",
   submitted: "bg-sky-400/15 text-sky-200",
-  pending: "bg-amber-400/15 text-amber-200",
-  scheduled: "bg-violet-400/15 text-violet-200",
+  draft: "bg-white/10 text-white/80",
+  awaiting_wallet: "bg-amber-400/15 text-amber-200",
   failed: "bg-rose-400/15 text-rose-200",
+  reviewed: "bg-violet-400/15 text-violet-200",
 };
 
 export function TransactionList({ transactions }: TransactionListProps) {
@@ -20,10 +21,10 @@ export function TransactionList({ transactions }: TransactionListProps) {
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="font-display text-xl font-semibold text-white">
-            Recent activity
+            Confidential activity
           </p>
           <p className="mt-1 text-sm text-white/[0.58]">
-            Synced from your PostgreSQL history.
+            Synced from your confidential action history.
           </p>
         </div>
         <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/[0.65]">
@@ -33,59 +34,46 @@ export function TransactionList({ transactions }: TransactionListProps) {
 
       <div className="mt-5 space-y-3">
         {transactions.length ? (
-          transactions.map((transaction) => (
+          transactions.map((transaction, index) => (
             <div
-              key={transaction.id}
+              key={`${transaction.created_at}-${transaction.type}-${index}`}
               className="rounded-[1.4rem] border border-white/[0.08] bg-white/[0.03] px-4 py-4"
             >
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="font-medium text-white">
-                    {transaction.title ?? formatTitle(transaction)}
-                  </p>
+                  <p className="font-medium text-white">{formatType(transaction.type)}</p>
                   <p className="mt-1 text-sm text-white/[0.55]">
-                    {transaction.subtitle ?? transaction.network}
+                    {transaction.public_summary}
                   </p>
                   <p className="mt-2 text-xs text-white/[0.48]">
-                    Type: {transaction.transaction_type}
+                    {getModeDescription(transaction.type)}
                   </p>
-                  <p className="mt-1 text-xs text-white/[0.48]">
-                    Recipient: {transaction.recipient_address ?? "Not applicable"}
+                  <p className="mt-2 text-xs text-white/[0.48]">
+                    Network: {transaction.network}
                   </p>
                   <p className="mt-1 break-all text-xs text-white/[0.42]">
-                    Tx hash: {transaction.tx_hash ?? "Pending / not available"}
+                    Tx hash: {transaction.tx_hash ?? "Not submitted yet"}
+                  </p>
+                  <p className="mt-1 break-all text-xs text-white/[0.42]">
+                    Contract: {transaction.contract_address ?? "Pending wallet step"}
                   </p>
                   <p className="mt-2 text-xs text-white/40">
                     {new Date(transaction.created_at).toLocaleString()}
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="font-display text-md font-semibold text-white">
-                    {formatAmount(transaction)}
-                  </p>
                   <span
                     className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${statusClasses[transaction.status]}`}
                   >
-                    {transaction.status}
+                    {formatStatus(transaction.status)}
                   </span>
                 </div>
               </div>
-
-              {transaction.explorer_url ? (
-                <a
-                  href={transaction.explorer_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-3 inline-flex text-xs font-semibold text-accent-soft"
-                >
-                  View on Explorer
-                </a>
-              ) : null}
             </div>
           ))
         ) : (
-          <div className="rounded-[1.4rem] border border-white/[0.08] bg-white/[0.03] px-4 py-5 text-sm text-white/[0.58]">
-            No activity yet. Your sends, scheduled payments, savings positions, and gift card requests will appear here.
+          <div className="rounded-[1.4rem] border border-white/[0.08] bg-white/[0.03] px-4 py-8 text-center text-sm text-white/[0.58]">
+            No confidential actions yet. Start with a private payment, savings vault, or agreement prompt.
           </div>
         )}
       </div>
@@ -93,14 +81,25 @@ export function TransactionList({ transactions }: TransactionListProps) {
   );
 }
 
-function formatTitle(transaction: TransactionHistoryItem) {
-  return `${transaction.transaction_type} ${transaction.asset_symbol}`.replace(
-    /\b\w/g,
-    (char) => char.toUpperCase(),
-  );
+function formatType(type: ConfidentialHistoryItem["type"]) {
+  return type.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function formatAmount(transaction: TransactionHistoryItem) {
-  if (transaction.amount === "0") return transaction.asset_symbol;
-  return `${transaction.amount} ${transaction.asset_symbol}`;
+function formatStatus(status: ConfidentialHistoryItem["status"]) {
+  return status.replace(/_/g, " ");
+}
+
+function getModeDescription(type: ConfidentialHistoryItem["type"]) {
+  switch (type) {
+    case "confidential_payment":
+      return "Recipient receives inside ChapChap private balance.";
+    case "public_payment":
+      return "Recipient receives normal Sepolia ETH.";
+    case "confidential_savings":
+      return "Funds move into the ChapChap private savings flow.";
+    case "confidential_agreement":
+      return "Agreement escrow stays in the ChapChap contract until settlement.";
+    default:
+      return "Confidential activity recorded for this wallet.";
+  }
 }
