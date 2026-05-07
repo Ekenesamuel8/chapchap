@@ -1,6 +1,6 @@
-import contractArtifact from "../../../contracts-zama/artifacts/contracts/ChapChapConfidentialCore.sol/ChapChapConfidentialCore.json";
+import { CHAPCHAP_CONFIDENTIAL_CORE_ABI } from "./chapchap-confidential-core-abi";
 
-export const CHAPCHAP_CONFIDENTIAL_CORE_ABI = contractArtifact.abi;
+export { CHAPCHAP_CONFIDENTIAL_CORE_ABI };
 
 export const ZAMA_SEPOLIA_CHAIN_ID = Number(
   process.env.NEXT_PUBLIC_ZAMA_CHAIN_ID ?? "11155111",
