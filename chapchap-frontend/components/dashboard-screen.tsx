@@ -23,9 +23,14 @@ import {
 import { clearStoredChatSession } from "@/lib/auth-storage";
 import {
   CHAPCHAP_CONFIDENTIAL_CORE_ADDRESS,
+  ZAMA_SEPOLIA_CHAIN_ID,
   getTxExplorerUrl,
 } from "@/lib/contracts/chapchap-confidential-core";
-import { encryptAmount64, toUint64Wei } from "@/lib/zamaClient";
+import {
+  encryptAmount64,
+  toUint64Wei,
+  type ZamaEncryptionProgress,
+} from "@/lib/zamaClient";
 import {
   Attachment,
   ChatItem,
@@ -48,6 +53,14 @@ type PendingActionState =
   | {
       field: "recipient_address" | "amount" | "transfer_mode";
       action: ConfidentialActionCard;
+    }
+  | null;
+
+type EncryptionRecoveryState =
+  | {
+      action: ConfidentialActionCard;
+      kind: "private_transfer" | "private_save_after_deposit";
+      message: string;
     }
   | null;
 
@@ -96,6 +109,8 @@ export function DashboardScreen() {
   const [submittedTransaction, setSubmittedTransaction] =
     useState<SubmittedTransactionView | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [encryptionRecovery, setEncryptionRecovery] =
+    useState<EncryptionRecoveryState>(null);
   const hasStartedInitialLoadRef = useRef(false);
 
   useEffect(() => {
@@ -111,6 +126,7 @@ export function DashboardScreen() {
     setPendingAction(null);
     setSubmittedTransaction(null);
     setStatusMessage(null);
+    setEncryptionRecovery(null);
   }, [hydrated, isAuthenticated, router, token]);
 
   useEffect(() => () => {
@@ -182,6 +198,7 @@ export function DashboardScreen() {
     disconnectWallet();
     setPendingAction(null);
     setSubmittedTransaction(null);
+    setEncryptionRecovery(null);
     setStatusMessage("Wallet disconnected from ChapChap Confidential.");
   }, [disconnectWallet]);
 
@@ -311,6 +328,7 @@ export function DashboardScreen() {
     setComposerValue("");
     setAttachments([]);
     setStatusMessage(null);
+    setEncryptionRecovery(null);
     setChatLoading(true);
 
     try {
@@ -392,6 +410,7 @@ export function DashboardScreen() {
   const handlePrepareAction = async (action: ConfidentialActionCard) => {
     try {
       setStatusMessage(null);
+      setEncryptionRecovery(null);
 
       const unresolved = resolvePendingAction(action);
       if (unresolved) {
@@ -448,8 +467,15 @@ export function DashboardScreen() {
     }
   };
 
+  const handleZamaProgress = useCallback((progress: ZamaEncryptionProgress) => {
+    setStatusMessage(progress.message);
+  }, []);
+
   const submitSavingsAction = useCallback(
-    async (action: ConfidentialActionCard) => {
+    async (
+      action: ConfidentialActionCard,
+      options: { skipDeposit?: boolean } = {},
+    ) => {
       const amount = action.amount;
       if (!amount) {
         throw new Error("This savings draft is missing an ETH amount.");
@@ -458,21 +484,47 @@ export function DashboardScreen() {
         throw new Error("You need to be signed in before recording confidential actions.");
       }
 
+      const publicAmountWei = await preflightConfidentialAmount({
+        amount,
+        connectedAddress,
+      });
       const { contract, signerAddress } = await getContract();
-      const publicAmountWei = toUint64Wei(amount);
 
-      setStatusMessage("Waiting for wallet confirmation...");
-      const depositTx = await contract.deposit({ value: publicAmountWei });
-      setStatusMessage("Submitting confidential transaction...");
-      await depositTx.wait();
+      let depositHash: string | null = null;
+      if (!options.skipDeposit) {
+        setStatusMessage("Waiting for wallet confirmation...");
+        const depositTx = await contract.deposit({ value: publicAmountWei });
+        setStatusMessage("Submitting confidential transaction...");
+        await depositTx.wait();
+        depositHash = depositTx.hash;
+      }
 
-      setStatusMessage("Encrypting amount...");
-      const { encryptedAmount, inputProof, amountWeiUint64 } = await encryptAmount64(
-        window.ethereum,
-        CHAPCHAP_CONFIDENTIAL_CORE_ADDRESS,
-        signerAddress,
-        publicAmountWei,
-      );
+      let encryptedAmount: `0x${string}`;
+      let inputProof: `0x${string}`;
+      let amountWeiUint64: bigint;
+      try {
+        const encrypted = await encryptAmount64(
+          window.ethereum,
+          CHAPCHAP_CONFIDENTIAL_CORE_ADDRESS,
+          signerAddress,
+          publicAmountWei,
+          { onProgress: handleZamaProgress },
+        );
+        encryptedAmount = encrypted.encryptedAmount;
+        inputProof = encrypted.inputProof;
+        amountWeiUint64 = encrypted.amountWeiUint64;
+      } catch (error) {
+        const message =
+          options.skipDeposit || depositHash
+            ? "Deposit succeeded, but private savings encryption failed. Your funds remain in your ChapChap contract balance. Retry private save."
+            : getEncryptionFailureMessage(error);
+        setEncryptionRecovery({
+          action,
+          kind: "private_save_after_deposit",
+          message,
+        });
+        throw new Error(message);
+      }
 
       setStatusMessage("Waiting for wallet confirmation...");
       const savingsTx = await contract.saveConfidential(
@@ -507,15 +559,26 @@ export function DashboardScreen() {
 
       setSubmittedTransaction(receiptView);
       setPendingAction(null);
+      setEncryptionRecovery(null);
       setStatusMessage("Saved to history. Transaction submitted.");
       pushAssistantMessage(
-        `Savings deposit and confidential save submitted on Sepolia. Deposit tx: ${shortenHash(
-          depositTx.hash,
-        )}. Save tx: ${shortenHash(savingsTx.hash)}.`,
+        depositHash
+          ? `Savings deposit and confidential save submitted on Sepolia. Deposit tx: ${shortenHash(
+              depositHash,
+            )}. Save tx: ${shortenHash(savingsTx.hash)}.`
+          : `Confidential save submitted on Sepolia. Save tx: ${shortenHash(savingsTx.hash)}.`,
       );
       await refreshWalletState();
     },
-    [getContract, networkLabel, pushAssistantMessage, refreshWalletState, token],
+    [
+      connectedAddress,
+      getContract,
+      handleZamaProgress,
+      networkLabel,
+      pushAssistantMessage,
+      refreshWalletState,
+      token,
+    ],
   );
 
   const submitAgreementAction = useCallback(
@@ -567,6 +630,7 @@ export function DashboardScreen() {
 
       setSubmittedTransaction(receiptView);
       setPendingAction(null);
+      setEncryptionRecovery(null);
       setStatusMessage("Saved to history. Transaction submitted.");
       pushAssistantMessage(
         "Agreement transaction submitted on Sepolia. You can review the tx hash now and submit proof later from the same chat.",
@@ -588,21 +652,40 @@ export function DashboardScreen() {
         throw new Error("This payment still needs an ETH amount.");
       }
 
-      setStatusMessage("Encrypting amount...");
+      const amountWei = await preflightConfidentialAmount({
+        amount: action.amount,
+        connectedAddress,
+      });
       const { contract, signerAddress } = await getContract();
-      const amountWei = toUint64Wei(action.amount);
       const senderMirrorBalance = await contract.publicBalanceMirror(signerAddress);
 
       if (BigInt(senderMirrorBalance) < amountWei) {
         throw new Error("Deposit into your confidential balance first.");
       }
 
-      const { encryptedAmount, inputProof, amountWeiUint64 } = await encryptAmount64(
-        window.ethereum,
-        CHAPCHAP_CONFIDENTIAL_CORE_ADDRESS,
-        signerAddress,
-        amountWei,
-      );
+      let encryptedAmount: `0x${string}`;
+      let inputProof: `0x${string}`;
+      let amountWeiUint64: bigint;
+      try {
+        const encrypted = await encryptAmount64(
+          window.ethereum,
+          CHAPCHAP_CONFIDENTIAL_CORE_ADDRESS,
+          signerAddress,
+          amountWei,
+          { onProgress: handleZamaProgress },
+        );
+        encryptedAmount = encrypted.encryptedAmount;
+        inputProof = encrypted.inputProof;
+        amountWeiUint64 = encrypted.amountWeiUint64;
+      } catch (error) {
+        const message = getEncryptionFailureMessage(error);
+        setEncryptionRecovery({
+          action,
+          kind: "private_transfer",
+          message,
+        });
+        throw new Error(message);
+      }
 
       setStatusMessage("Waiting for wallet confirmation...");
       const tx = await contract.transferConfidential(
@@ -638,13 +721,22 @@ export function DashboardScreen() {
 
       setSubmittedTransaction(receiptView);
       setPendingAction(null);
+      setEncryptionRecovery(null);
       setStatusMessage("Saved to history. Transaction submitted.");
       pushAssistantMessage(
         `Confidential transfer submitted on Sepolia. Tx hash: ${shortenHash(tx.hash)}.`,
       );
       await refreshWalletState();
     },
-    [getContract, networkLabel, pushAssistantMessage, refreshWalletState, token],
+    [
+      connectedAddress,
+      getContract,
+      handleZamaProgress,
+      networkLabel,
+      pushAssistantMessage,
+      refreshWalletState,
+      token,
+    ],
   );
 
   const submitPublicPaymentAction = useCallback(
@@ -692,6 +784,7 @@ export function DashboardScreen() {
 
       setSubmittedTransaction(receiptView);
       setPendingAction(null);
+      setEncryptionRecovery(null);
       setStatusMessage("Saved to history. Transaction submitted.");
       pushAssistantMessage(
         `Public Sepolia ETH transfer submitted. Tx hash: ${shortenHash(tx.hash)}.`,
@@ -700,6 +793,60 @@ export function DashboardScreen() {
     },
     [getSignerClient, networkLabel, pushAssistantMessage, refreshWalletState, token],
   );
+
+  const handleRetryPrivateAction = useCallback(async () => {
+    if (!encryptionRecovery) return;
+    setStatusMessage(null);
+    try {
+      if (encryptionRecovery.kind === "private_save_after_deposit") {
+        await submitSavingsAction(encryptionRecovery.action, { skipDeposit: true });
+        return;
+      }
+      await submitPaymentAction(encryptionRecovery.action);
+    } catch (error) {
+      const message = mapFrontendError(
+        error,
+        "The Zama Sepolia relayer is temporarily unreachable. Your funds were not moved. Try again, or use public transfer for demo.",
+      );
+      pushSystemMessage(message);
+    }
+  }, [
+    encryptionRecovery,
+    pushSystemMessage,
+    submitPaymentAction,
+    submitSavingsAction,
+  ]);
+
+  const handleSendPublicInstead = useCallback(async () => {
+    if (!encryptionRecovery || encryptionRecovery.kind !== "private_transfer") return;
+    const publicAction: ConfidentialActionCard = {
+      ...encryptionRecovery.action,
+      intent: "public_payment",
+      transferMode: "public",
+      missingFields: encryptionRecovery.action.missingFields.filter(
+        (field) => field !== "transfer_mode",
+      ),
+    };
+
+    setStatusMessage(null);
+    setEncryptionRecovery(null);
+    pushAssistantMessage("Switching this draft to a public Sepolia ETH transfer.");
+
+    try {
+      await submitPublicPaymentAction(publicAction);
+    } catch (error) {
+      const message = mapFrontendError(
+        error,
+        "I couldn't submit the public Sepolia transfer right now.",
+      );
+      pushSystemMessage(message);
+    }
+  }, [
+    encryptionRecovery,
+    pushAssistantMessage,
+    pushSystemMessage,
+    submitPublicPaymentAction,
+  ]);
 
   const handleSubmitProof = async (
     agreementId: number,
@@ -830,6 +977,32 @@ export function DashboardScreen() {
                   <p className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
                     {statusMessage}
                   </p>
+                ) : null}
+
+                {encryptionRecovery ? (
+                  <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-4 text-sm text-amber-100">
+                    <p className="leading-6">{encryptionRecovery.message}</p>
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={() => void handleRetryPrivateAction()}
+                        className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-black"
+                      >
+                        {encryptionRecovery.kind === "private_save_after_deposit"
+                          ? "Retry private save"
+                          : "Retry private transfer"}
+                      </button>
+                      {encryptionRecovery.kind === "private_transfer" ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleSendPublicInstead()}
+                          className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-semibold text-white"
+                        >
+                          Send publicly instead
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
                 ) : null}
               </section>
             </div>
@@ -989,6 +1162,40 @@ function parseTransferMode(value: unknown) {
   return null;
 }
 
+async function preflightConfidentialAmount({
+  amount,
+  connectedAddress,
+}: {
+  amount: string;
+  connectedAddress: string | null;
+}) {
+  if (!CHAPCHAP_CONFIDENTIAL_CORE_ADDRESS) {
+    throw new Error(
+      "NEXT_PUBLIC_ZAMA_CORE_CONTRACT_ADDRESS is missing. Add the deployed Sepolia contract address first.",
+    );
+  }
+  if (!window.ethereum) {
+    throw new Error("MetaMask wasn't detected in this browser.");
+  }
+  const accounts = (await window.ethereum.request({
+    method: "eth_accounts",
+  })) as unknown;
+  const walletAddress =
+    connectedAddress ||
+    (Array.isArray(accounts) && typeof accounts[0] === "string" ? accounts[0] : null);
+  if (!walletAddress) {
+    throw new Error("Connect MetaMask on Sepolia before encrypting confidential amounts.");
+  }
+
+  const chainIdHex = await window.ethereum.request({ method: "eth_chainId" });
+  const chainId = typeof chainIdHex === "string" ? Number(chainIdHex) : null;
+  if (chainId !== ZAMA_SEPOLIA_CHAIN_ID) {
+    throw new Error("Switch MetaMask to Sepolia before encrypting confidential amounts.");
+  }
+
+  return toUint64Wei(amount);
+}
+
 function mapFrontendError(error: unknown, fallbackMessage: string) {
   if (error instanceof ApiError) {
     return error.message;
@@ -1019,13 +1226,12 @@ function mapFrontendError(error: unknown, fallbackMessage: string) {
       return "The Zama encryption client could not initialize with this wallet provider.";
     }
     if (
-      (lowered.includes("zama relayer encryption failed") && lowered.includes("404")) ||
+      lowered.includes("zama sepolia relayer is temporarily unreachable") ||
+      lowered.includes("could not reach the sepolia relayer") ||
+      lowered.includes("zama relayer encryption failed") ||
       (lowered.includes("relayer") && lowered.includes("404"))
     ) {
-      return "Zama relayer encryption failed with a 404 response. Check the Sepolia relayer configuration and try again.";
-    }
-    if (lowered.includes("could not reach the sepolia relayer")) {
-      return "Zama relayer encryption could not reach the Sepolia relayer. Check your network connection and try again.";
+      return getEncryptionFailureMessage(error);
     }
     if (lowered.includes("requires a sepolia wallet connection")) {
       return "Switch MetaMask to Sepolia before encrypting confidential amounts.";
@@ -1041,6 +1247,14 @@ function mapFrontendError(error: unknown, fallbackMessage: string) {
   }
 
   return fallbackMessage;
+}
+
+function getEncryptionFailureMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("Your funds were not moved")) {
+    return message;
+  }
+  return "The Zama Sepolia relayer is temporarily unreachable. Your funds were not moved. Try again, or use public transfer for demo.";
 }
 
 function createId(prefix: string) {

@@ -4,6 +4,8 @@ import type { Eip1193Provider, Signer } from "ethers";
 const MAX_UINT64 = BigInt("18446744073709551615");
 const ZAMA_SEPOLIA_CHAIN_ID = 11155111;
 const ZAMA_RELAYER_URL_OVERRIDE = process.env.NEXT_PUBLIC_ZAMA_RELAYER_URL?.trim();
+const RELAYER_OPERATION_TIMEOUT_MS = 25_000;
+const RELAYER_RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 
 type ZamaInputProofBytes = {
   handles: Uint8Array[];
@@ -62,6 +64,24 @@ type ZamaInstance = {
 
 type ZamaRelayerSdkModule = typeof import("@zama-fhe/relayer-sdk/web");
 
+export type ZamaEncryptionStage =
+  | "preparing"
+  | "connecting"
+  | "encrypting"
+  | "retrying"
+  | "ready";
+
+export type ZamaEncryptionProgress = {
+  stage: ZamaEncryptionStage;
+  attempt: number;
+  maxRetries: number;
+  message: string;
+};
+
+type ZamaEncryptionOptions = {
+  onProgress?: (progress: ZamaEncryptionProgress) => void;
+};
+
 let sdkModulePromise: Promise<ZamaRelayerSdkModule> | null = null;
 let sdkInitPromise: Promise<void> | null = null;
 let relayerInstancePromise: Promise<unknown> | null = null;
@@ -74,7 +94,16 @@ export type EncryptedAmount64 = {
   amountEthDisplay: string;
 };
 
-export async function initZamaRelayer(providerOrSigner: unknown) {
+export async function initZamaRelayer(
+  providerOrSigner: unknown,
+  options: ZamaEncryptionOptions = {},
+) {
+  options.onProgress?.({
+    stage: "preparing",
+    attempt: 1,
+    maxRetries: RELAYER_RETRY_DELAYS_MS.length,
+    message: "Preparing Zama encryption...",
+  });
   const sdk = await loadRelayerSdk();
   const networkProvider = resolveEip1193Provider(providerOrSigner);
   const providerChainId = await getProviderChainId(networkProvider);
@@ -100,9 +129,19 @@ export async function initZamaRelayer(providerOrSigner: unknown) {
     throw new Error("Zama encryption requires a Sepolia wallet connection.");
   }
 
+  options.onProgress?.({
+    stage: "connecting",
+    attempt: 1,
+    maxRetries: RELAYER_RETRY_DELAYS_MS.length,
+    message: "Connecting to Zama Sepolia relayer...",
+  });
+
   if (!sdkInitPromise) {
-    sdkInitPromise = sdk
-      .initSDK()
+    sdkInitPromise = withRelayerRetries(
+      () => withTimeout(sdk.initSDK(), RELAYER_OPERATION_TIMEOUT_MS, "Zama SDK initialization timed out."),
+      "SDK init",
+      options.onProgress,
+    )
       .then(() => {
         debugLog("SDK initialized");
       })
@@ -111,15 +150,25 @@ export async function initZamaRelayer(providerOrSigner: unknown) {
         sdkInitPromise = null;
         throw error;
       });
+  } else {
+    debugLog("Reusing cached SDK initialization");
   }
   await sdkInitPromise;
 
   if (!relayerInstancePromise) {
-    relayerInstancePromise = sdk
-      .createInstance({
-        ...sepoliaConfig,
-        network: networkProvider,
-      })
+    relayerInstancePromise = withRelayerRetries(
+      () =>
+        withTimeout(
+          sdk.createInstance({
+            ...sepoliaConfig,
+            network: networkProvider,
+          }),
+          RELAYER_OPERATION_TIMEOUT_MS,
+          "Zama relayer instance creation timed out.",
+        ),
+      "Relayer instance",
+      options.onProgress,
+    )
       .then((instance) => {
         debugLog("Relayer instance created", {
           relayerUrl: sepoliaConfig.relayerUrl,
@@ -131,6 +180,10 @@ export async function initZamaRelayer(providerOrSigner: unknown) {
         relayerInstancePromise = null;
         throw error;
       });
+  } else {
+    debugLog("Reusing cached relayer instance", {
+      relayerUrl: sepoliaConfig.relayerUrl,
+    });
   }
 
   const relayerInstance = await relayerInstancePromise;
@@ -142,9 +195,16 @@ export async function encryptAmount64(
   contractAddress: string,
   userAddress: string,
   amountInput: string | bigint,
+  options: ZamaEncryptionOptions = {},
 ): Promise<EncryptedAmount64> {
+  options.onProgress?.({
+    stage: "preparing",
+    attempt: 1,
+    maxRetries: RELAYER_RETRY_DELAYS_MS.length,
+    message: "Preparing Zama encryption...",
+  });
   const amountWei = normalizeAmountWei(amountInput);
-  const instance = await initZamaRelayer(providerOrSigner);
+  const instance = await initZamaRelayer(providerOrSigner, options);
 
   debugLog("Encrypting amount", {
     contractAddress,
@@ -154,12 +214,27 @@ export async function encryptAmount64(
     amountUint64: amountWei.toString(),
   });
 
-  const buffer = instance.createEncryptedInput(contractAddress, userAddress);
-  buffer.add64(amountWei);
-
   let ciphertexts: ZamaInputProofBytes;
   try {
-    ciphertexts = await buffer.encrypt();
+    options.onProgress?.({
+      stage: "encrypting",
+      attempt: 1,
+      maxRetries: RELAYER_RETRY_DELAYS_MS.length,
+      message: "Encrypting amount locally...",
+    });
+    ciphertexts = await withRelayerRetries(
+      () => {
+        const buffer = instance.createEncryptedInput(contractAddress, userAddress);
+        buffer.add64(amountWei);
+        return withTimeout(
+          buffer.encrypt(),
+          RELAYER_OPERATION_TIMEOUT_MS,
+          "Zama encrypted input generation timed out.",
+        );
+      },
+      "Encrypted input",
+      options.onProgress,
+    );
   } catch (error) {
     console.error("[ChapChap][Zama] Encrypt amount failed", {
       contractAddress,
@@ -180,6 +255,13 @@ export async function encryptAmount64(
   if (!firstHandle || ciphertexts.inputProof.length === 0) {
     throw new Error("Zama relayer encryption failed to return a valid handle and proof.");
   }
+
+  options.onProgress?.({
+    stage: "ready",
+    attempt: 1,
+    maxRetries: RELAYER_RETRY_DELAYS_MS.length,
+    message: "Encryption ready. Confirm in wallet.",
+  });
 
   return {
     encryptedAmount: hexlify(firstHandle) as `0x${string}`,
@@ -384,18 +466,102 @@ function toUserFacingEncryptionError(error: unknown) {
 
   if (lowered.includes("404") || lowered.includes("not found")) {
     return new Error(
-      "Zama relayer encryption failed with a 404 response. Check the Sepolia relayer configuration and try again.",
+      "The Zama Sepolia relayer is temporarily unreachable. Your funds were not moved. Try again, or use public transfer for demo.",
     );
   }
 
-  if (lowered.includes("network") || lowered.includes("fetch")) {
+  if (
+    lowered.includes("network") ||
+    lowered.includes("fetch") ||
+    lowered.includes("timeout") ||
+    lowered.includes("timed out") ||
+    lowered.includes("relayer")
+  ) {
     return new Error(
-      "Zama relayer encryption could not reach the Sepolia relayer. Check your network connection and try again.",
+      "The Zama Sepolia relayer is temporarily unreachable. Your funds were not moved. Try again, or use public transfer for demo.",
     );
   }
 
   return new Error(
     message || "Zama relayer encryption failed before the confidential transaction could be sent.",
+  );
+}
+
+async function withRelayerRetries<T>(
+  operation: () => Promise<T>,
+  label: string,
+  onProgress?: (progress: ZamaEncryptionProgress) => void,
+): Promise<T> {
+  const maxRetries = RELAYER_RETRY_DELAYS_MS.length;
+  for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
+    try {
+      debugLog(`${label} attempt`, {
+        attempt,
+        maxAttempts: maxRetries + 1,
+        timeoutMs: RELAYER_OPERATION_TIMEOUT_MS,
+      });
+      return await operation();
+    } catch (error) {
+      const retryNumber = attempt;
+      const shouldRetry = attempt <= maxRetries && isRetryableRelayerError(error);
+      console.warn(`[ChapChap][Zama] ${label} attempt failed`, {
+        attempt,
+        maxAttempts: maxRetries + 1,
+        retrying: shouldRetry,
+        error,
+      });
+
+      if (!shouldRetry) {
+        throw error;
+      }
+
+      onProgress?.({
+        stage: "retrying",
+        attempt: retryNumber,
+        maxRetries,
+        message: `Retrying relayer connection (${retryNumber}/${maxRetries})...`,
+      });
+      await delay(RELAYER_RETRY_DELAYS_MS[attempt - 1]);
+    }
+  }
+
+  throw new Error("Zama relayer operation failed after retries.");
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+
+    promise
+      .then(resolve)
+      .catch(reject)
+      .finally(() => window.clearTimeout(timer));
+  });
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isRetryableRelayerError(error: unknown) {
+  const message =
+    error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const lowered = message.toLowerCase();
+  return (
+    lowered.includes("404") ||
+    lowered.includes("not found") ||
+    lowered.includes("network") ||
+    lowered.includes("fetch") ||
+    lowered.includes("timeout") ||
+    lowered.includes("timed out") ||
+    lowered.includes("relayer") ||
+    lowered.includes("failed to fetch")
   );
 }
 
