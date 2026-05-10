@@ -1,277 +1,260 @@
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/5e32d78e-bfde-4c43-8e71-4bb573282520" />
+# ChapChap Confidential
 
-# ChapChap
+ChapChap Confidential is an AI-powered confidential finance and agreement assistant built for the Zama Builder Track. It lets users describe payments, savings, and agreements in plain English, then turns those prompts into Sepolia wallet actions and Zama/FHEVM-compatible confidential contract calls.
 
-## ChapChap Confidential
+The app keeps the original ChapChap chat-first experience, but pivots the product to confidential Sepolia flows powered by MetaMask, Django, Next.js, and a Zama FHEVM smart contract.
 
-ChapChap Confidential is the current Zama Builder Track version of the project. It pivots the original conversational wallet into an AI-powered private payments, savings, and agreements assistant on Sepolia with Zama/FHEVM-compatible flows.
+## Current Product
 
-Current confidential highlights:
+Users can:
 
-- confidential transfers that update private ChapChap balances inside the contract
-- public or confidential Sepolia ETH transfer choice
-- private savings deposits with explicit unlock and withdraw UX
-- AI-parsed agreement drafts plus proof review recommendations
-- MetaMask + Sepolia frontend flow with Zama relayer-based encrypted inputs
+- Send confidential ChapChap transfers using encrypted client-side input.
+- Send normal public Sepolia ETH transfers when privacy mode is not needed.
+- Deposit ETH and move value into a confidential savings bucket.
+- Create agreement escrow drafts from plain English.
+- Submit proof and receive AI-assisted verdict recommendations.
+- View confidential action history.
+- Connect MetaMask on Sepolia and see wallet ETH balance.
+- Reveal ChapChap private balance using Zama user decryption where supported.
+- Use dark or light mode across the landing page and app.
 
 Important privacy wording:
 
-- wallet addresses and transaction existence may still be public
-- sensitive values can be encrypted where supported by Zama/FHEVM
-- agreement escrow amounts are still public in the current MVP unless explicitly moved into a confidential contract path later
+- Wallet addresses and transaction existence may still be public.
+- Public deposits, public transfers, and MVP agreement escrow ETH values are visible onchain.
+- Sensitive values such as internal balances, confidential transfer amounts, savings amounts, and internal FHEVM computations can be encrypted where supported by Zama/FHEVM.
+- The contract can compute over encrypted values without revealing them to the public.
 
-## Zama / Sepolia setup
+## Live Flow
 
-Frontend example variables:
+1. User signs in with Google.
+2. User launches the chat-first dashboard.
+3. User connects MetaMask and switches to Sepolia.
+4. User types a prompt such as `Send 0.0001 ETH to Ada privately`.
+5. Backend parser classifies the prompt and returns a structured action.
+6. Frontend renders a confirmation card inside the chat.
+7. For confidential values, the frontend encrypts the amount using the Zama Relayer SDK.
+8. User confirms the wallet transaction in MetaMask.
+9. Frontend records the real transaction hash through the confidential backend API.
+10. History shows the submitted action and Sepolia explorer link.
 
-```env
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
-NEXT_PUBLIC_GOOGLE_CLIENT_ID=your_google_client_id
-NEXT_PUBLIC_ZAMA_CORE_CONTRACT_ADDRESS=0xYOUR_DEPLOYED_CONTRACT
-NEXT_PUBLIC_ZAMA_CHAIN_ID=11155111
-NEXT_PUBLIC_ZAMA_EXPLORER_BASE_URL=https://sepolia.etherscan.io
-```
+No fake transaction hashes are shown. Backend history is not marked submitted unless a real transaction hash exists.
 
-Backend example variables:
+## Features
 
-```env
-SEPOLIA_RPC_URL=https://your-sepolia-rpc
-ZAMA_CORE_CONTRACT_ADDRESS=0xYOUR_DEPLOYED_CONTRACT
-ZAMA_CHAIN_ID=11155111
-ZAMA_EXPLORER_BASE_URL=https://sepolia.etherscan.io
-```
+### AI Prompt Parser
 
-Use placeholders or safe public contract addresses only. Do not commit private keys or live secret values.
+The confidential parser handles natural-language prompts for:
 
-ChapChap is an AI-powered wallet assistant built for Tezos EVM on Etherlink. It helps users interact with crypto through natural language instead of complex wallet interfaces, making common actions like funding a wallet, sending assets, reviewing transactions, and exploring adjacent product flows more approachable for everyday users. The project combines conversational AI, a mobile-first frontend, a Django backend, and real Etherlink testnet integration to create a beginner-friendly onchain experience.
+- `confidential_payment`
+- `public_payment`
+- `confidential_savings`
+- `confidential_agreement`
+- `proof_submission`
+- `general_help`
 
-## Problem
+It extracts fields such as amount, asset, recipient name, recipient wallet address, deadline, lock rule, transfer mode, and agreement condition. If a critical field is missing, the chat asks for it instead of failing.
 
-Crypto products still assume too much prior knowledge.
+Example prompts:
 
-For many users, especially non-technical users, even simple actions like sending tokens or funding a wallet involve too many unfamiliar concepts:
+- `Send 0.0001 ETH to Ochi privately`
+- `Send 0.0001 ETH publicly to 0x...`
+- `Save 0.0001 ETH for 7 days`
+- `Create agreement: pay John Doe 0.002 ETH if he delivers the report`
+- `Submit proof for my agreement`
 
-- wallet addresses are intimidating
-- transaction confirmation screens are confusing
-- balances and networks are hard to interpret
-- product and payment flows feel fragmented
-- the user has to learn blockchain UX before they can complete basic tasks
+### Confidential Payments
 
-This creates a major adoption barrier. People who are comfortable chatting in plain language are often blocked by interfaces that expect them to understand wallets, RPC networks, gas, token standards, and transaction details upfront.
+Confidential transfers use the deployed `ChapChapConfidentialCore` contract on Sepolia.
 
-## Solution
+For private transfers:
 
-ChapChap turns a crypto wallet into a conversational assistant.
+- User must have ETH deposited into the ChapChap contract balance.
+- Frontend converts the ETH amount to wei and validates it fits `uint64`.
+- Frontend encrypts the amount client-side with the Zama Relayer SDK.
+- Contract receives `externalEuint64`, `inputProof`, and a public mirror amount for MVP accounting.
+- Recipient receives funds inside their ChapChap private contract balance, not directly in MetaMask.
 
-Instead of forcing users to navigate Web3 using technical forms, ChapChap allows them to express intent in plain English. A user can sign in, get an automatically created wallet, fund it, and then tell the assistant what they want to do. ChapChap interprets the request, gathers missing information through follow-up questions, prepares a clear confirmation step, and then executes supported onchain actions on Etherlink testnet.
+For public transfers:
 
-The result is a more natural and beginner-friendly wallet experience that feels closer to messaging an assistant than operating a traditional crypto interface.
+- Frontend uses `signer.sendTransaction`.
+- Recipient receives normal Sepolia ETH directly in their wallet.
+- History stores the action as `public_payment`.
 
-## Why This Matters
+### Private Savings
 
-ChapChap matters because accessibility is still one of the biggest problems in Web3.
+Savings flow:
 
-A conversational wallet lowers the learning curve for users who are new to crypto by replacing rigid transaction forms with guided interaction. AI adds value by helping users describe what they want in natural language, while blockchain provides real ownership, transparent execution, and verifiable transaction history.
+- User describes a savings goal in chat.
+- Frontend submits a public `deposit()` transaction.
+- Frontend encrypts the savings amount.
+- Frontend calls `saveConfidential(encryptedAmount, inputProof, publicAmountWei)`.
+- Backend records a `SavingsPosition` with lock rule, unlock date, status, and transaction hash.
 
-This combination is especially useful for:
+Savings do not automatically return after the lock period. For the MVP, the UI tracks when savings become withdrawable and exposes withdrawal status. Automated keepers are not included.
 
-- first-time crypto users
-- users in mobile-first markets
-- users who want action-oriented flows instead of technical wallet menus
-- users who may understand their intent but not the exact blockchain mechanics needed to carry it out
+### Agreements and Proof
 
-ChapChap aims to bridge that gap by making crypto actions easier to understand without hiding the importance of confirmation and onchain accountability.
+Agreement flow:
 
-## Core Features
+- User describes an agreement in plain English.
+- Backend extracts recipient, amount, condition, deadline, and proof requirement.
+- Frontend hashes agreement metadata.
+- User creates an escrow with `createAgreement(recipient, deadline, metadataHash)` and ETH value.
+- Proof can be submitted later through the backend.
+- Backend returns an AI-assisted recommendation: `release`, `refund`, or `dispute`.
 
-- Google sign-in for easy onboarding
-- automatic custodial wallet creation for each user
-- wallet address display and copy flow
-- fund wallet flow with supported asset and network guidance
-- XTZ balance display on Etherlink testnet
-- send and receive XTZ on Etherlink testnet
-- AI-powered natural language payment intent parsing
-- conversational follow-up flow for incomplete payment requests
-- clear transaction confirmation flow before submission
-- transaction history backed by PostgreSQL
-- product search support with store links
-- portfolio and investment prompt support
-- scheduled payments support in stored/demo-safe mode
-- savings flow in demo mode
-- gift card flow in demo mode
+MVP note: agreement escrow ETH value is public in the current contract. Confidential agreement logic is the next layer.
 
-## AI Functionality
+### Private Balance Reveal
 
-AI is a meaningful part of ChapChap, not just a cosmetic chatbot layer.
+The Wallet page and dashboard show:
 
-ChapChap uses AI to make wallet interactions more usable and more natural:
+- Connected wallet address.
+- Sepolia ETH wallet balance.
+- ChapChap private balance status.
+- A `Reveal Private Balance` action.
 
-- Natural language parsing  
-  Users can describe payment requests in plain English, and the assistant interprets the intent, amount, asset, timing, and recipient context.
-
-- Conversational flow  
-  If a request is incomplete, ChapChap asks for the missing information instead of failing or forcing the user into a separate form.
-
-- Suggestions and guidance  
-  The assistant can guide users through supported actions and provide context-aware follow-up prompts.
-
-- Portfolio and investment prompts  
-  Users can ask questions like `How do I invest?` or `Analyze my portfolio and suggest investment`, and ChapChap responds with educational guidance informed by wallet context where available.
-
-- Shopping and product search assistance  
-  ChapChap can help users explore product-related prompts by returning practical shopping links and related suggestions.
-
-To keep the system efficient and resilient, the app uses deterministic logic where possible and relies on LLM calls only when they add real value.
-
-## Etherlink / Tezos EVM Integration
-
-ChapChap is built around Etherlink testnet as its live blockchain environment.
-
-Current Etherlink integration includes:
-
-- wallet balances read onchain
-- native XTZ transfer execution on Etherlink testnet
-- explorer links for submitted transactions
-- chain-aware wallet metadata and asset display
-- Etherlink-backed confirmation and transaction flow
-- an onchain payment intent registry contract deployed on Etherlink testnet
-
-Why Etherlink matters:
-
-- it provides an EVM-compatible environment, which simplifies developer tooling and wallet integration patterns
-- it enables low-friction Web3 UX for builders and users
-- it supports real onchain execution while remaining practical for hackathon delivery
-- it is a strong fit for a conversational wallet experience that still settles actions transparently onchain
+Only the connected wallet owner can request decryption of their ChapChap private balance.
 
 ## Architecture
 
-ChapChap is split into a frontend, backend, database, blockchain integration layer, and AI orchestration layer.
+ChapChap Confidential is split into four main layers.
 
-- Frontend  
-  Next.js (App Router), TypeScript, Tailwind CSS  
-  Mobile-first interface with dashboard, chat, wallet funding, confirmation, success, and history views.
+### Frontend
 
-- Backend  
-  Django + Django REST Framework  
-  Handles auth, wallet provisioning, conversational agent routing, payment preparation, transaction execution, history persistence, and optional registry writes.
+Next.js App Router with TypeScript and Tailwind CSS.
 
-- Database  
-  PostgreSQL  
-  Stores users, linked auth methods, wallets, encrypted keys, payment intents, transaction history, pending sessions, and demo feature records.
+Responsibilities:
 
-- Blockchain Integration  
-  Web3.py + Etherlink RPC  
-  Reads balances from Etherlink, submits real native-token transactions on Etherlink testnet, and can record payment intents onchain.
+- Landing page at `/`.
+- Chat-first assistant dashboard at `/dashboard`.
+- Wallet and private balance page at `/wallet`.
+- Confidential history page at `/history`.
+- Google sign-in UI.
+- MetaMask connection and Sepolia checks.
+- Zama Relayer SDK initialization and encrypted input generation.
+- Contract calls through `ethers`.
+- Transaction receipt display and backend tx recording.
 
-- AI Layer  
-  Gemini-backed advice and interpretation services plus deterministic routing logic  
-  Used for natural language interpretation, portfolio prompts, and assistant behavior.
+### Backend
 
-## User Flow
+Django + Django REST Framework.
 
-1. Sign in with Google.
-2. ChapChap automatically creates a wallet for the user.
-3. Fund the wallet using the wallet address or testnet funding flow.
-4. Type a request in the chat interface.
-5. ChapChap interprets the request and asks follow-up questions if needed.
-6. ChapChap prepares a confirmation view with the transaction details.
-7. After explicit confirmation, the transaction is submitted on Etherlink testnet.
+Responsibilities:
 
-## Working Features
+- Google authentication.
+- Token-based API auth.
+- Confidential prompt parsing.
+- Confidential action history.
+- Savings position tracking.
+- Agreement proof review and AI-assisted verdict recommendations.
+- Deployment-safe CORS, allowed-hosts, and health checks.
 
-The following features are currently implemented and working:
+The backend does not sign Zama contract transactions. Users sign Sepolia transactions from their connected wallet.
 
-- Google authentication
-- automatic wallet creation per user
-- encrypted backend wallet key storage
-- wallet address display and copy
-- fund wallet information flow
-- onchain balance reads for XTZ on Etherlink testnet
-- chat-based payment request parsing
-- conversational payment clarification flow
-- real native XTZ send flow on Etherlink testnet
-- transaction confirmation and success UX
-- explorer link generation
-- PostgreSQL-backed transaction history
-- portfolio and investment advice prompts
-- product search responses with useful store links
-- scheduled payment creation and scheduled history state
-- deployed frontend, backend, and smart contract setup
+### Smart Contracts
 
-## Demo / Planned Features
+Hardhat workspace in `contracts-zama/`.
 
-Some flows are currently implemented in demo mode or remain partially planned for future improvement:
+Main contract:
 
-- swap flow  
-  Conversational detection and preview exist, but full live swap execution is not yet integrated.
+- `ChapChapConfidentialCore.sol`
 
-- save / earn flow  
-  Implemented in demo mode with simulated strategy selection and savings position records.
+Implemented contract surface:
 
-- Bitrefill gift cards  
-  Implemented in demo-friendly form with result cards and history support; full API-backed purchase flow is planned.
+- `deposit() payable`
+- `withdraw(uint64 publicAmountWei)`
+- `transferConfidential(address recipient, externalEuint64 encryptedAmount, bytes inputProof, uint64 publicAmountWei)`
+- `saveConfidential(externalEuint64 encryptedAmount, bytes inputProof, uint64 publicAmountWei)`
+- `createAgreement(address recipient, uint256 deadline, bytes32 metadataHash) payable`
+- `submitVerdict(uint256 agreementId, bool releaseFunds)`
+- `getEncryptedBalance()`
+- `getEncryptedSavings()`
 
-- advanced scheduled execution  
-  Scheduled payments can be created and stored, but production-grade async execution and retry handling are future work.
+Current deployed Sepolia contract:
 
-## Smart Contract
+```text
+0xa3D96Dc13BDF9FD34Ae0003ab99E4C686802523A
+```
 
-ChapChap includes a lightweight onchain registry contract used to record payment intent metadata on Etherlink testnet.
+### Database
 
-- Contract Name: `ChapChapPaymentRegistry`
-- Contract Address: `0x9f68816F73bCf4A01b73dc75A1f0012AD7362d35`
-- Network: `Etherlink Testnet`
-- Purpose: `Store ChapChap payment intent records onchain for demo visibility, auditability, and hackathon submission readiness`
+PostgreSQL in production and local-compatible database configuration for development.
 
+Current confidential models:
 
-## Demo Video
+- `ConfidentialAction`
+- `ConfidentialAgreementRecord`
+- `SavingsPosition`
 
-- Demo Video: `https://www.loom.com/share/81ba612a3c364b6b96b501dbf80300a3`
+## API Surface
+
+Confidential backend routes:
+
+- `POST /api/confidential/parse/`
+- `GET /api/confidential/history/`
+- `GET /api/confidential/savings/`
+- `POST /api/confidential/savings/{id}/withdraw/`
+- `POST /api/confidential/actions/{id}/tx/`
+- `POST /api/confidential/agreements/{id}/proof/`
+
+Auth and health routes:
+
+- `POST /api/auth/google/`
+- `GET /api/me/`
+- `GET /api/health/`
 
 ## Repository Structure
 
-At a high level, the repository is organized like this:
+```text
+chapchap/
+  chapchap-frontend/
+    app/
+      page.tsx                 Landing page
+      dashboard/page.tsx       Chat-first assistant app
+      wallet/page.tsx          Wallet, balance, savings, private balance reveal
+      history/page.tsx         Confidential action history
+    components/
+      dashboard-screen.tsx     Main assistant chat flow
+      chat-message.tsx         Assistant/user messages and action cards
+      private-balance-card.tsx Private balance reveal UI
+      transaction-list.tsx     Confidential history list
+      providers/               Auth, wallet, and theme providers
+    lib/
+      api/confidential.ts      Confidential backend API client
+      api/auth.ts              Google auth and user API client
+      contracts/               Frontend-local ABI and contract helpers
+      zamaClient.ts            Zama Relayer SDK encryption/decryption helper
+      types.ts                 Shared frontend types
 
-- `chapchap-frontend/`  
-  Next.js frontend application, chat UI, dashboard, wallet screens, and responsive components.
+  chapchap-backend/
+    backend/
+      apps/
+        authn/                 Google auth and linked auth records
+        confidential/          Parser, history, savings, agreements, proof review
+        users/                 Custom user model and profile endpoints
+        ai_agent/              AI support services retained for assistant flows
+      config/                  Django settings, URLs, deployment config
+      shared/                  Health check and shared utilities
+    requirements.txt
 
-- `chapchap-backend/`  
-  Django backend application, REST API, auth, wallet provisioning, AI orchestration, blockchain integration, and history models.
+  contracts-zama/
+    contracts/
+      ChapChapConfidentialCore.sol
+    scripts/
+      deploy.js
+    hardhat.config.js
 
-- `contracts/`  
-  Solidity contracts for Etherlink deployment.
+  contracts/                   Legacy Etherlink contract workspace
+  scripts/                     Legacy helper scripts
+```
 
-- `scripts/`  
-  Hardhat deployment and read scripts for the ChapChap contract workspace.
-
-- `chapchap-backend/backend/apps/users/`  
-  Custom user model and user-facing profile/dashboard endpoints.
-
-- `chapchap-backend/backend/apps/authn/`  
-  Google authentication and linked auth method handling.
-
-- `chapchap-backend/backend/apps/wallets/`  
-  Wallet profile creation, encrypted key storage, wallet funding data, and balance snapshots.
-
-- `chapchap-backend/backend/apps/ai_agent/`  
-  Chat orchestration, conversational state, intent routing, advice prompts, and assistant behavior.
-
-- `chapchap-backend/backend/apps/payments/`  
-  Payment intents, submission flow, history records, scheduled payment support, savings demo, and gift card demo records.
-
-- `chapchap-backend/backend/apps/blockchain/`  
-  Etherlink read/write integration, gas helpers, native transfer submission, and payment registry recording.
+Legacy Etherlink-oriented folders remain in the repository for compatibility/history, but the current Zama product path uses the `chapchap-frontend`, `chapchap-backend/apps/confidential`, and `contracts-zama` flows described above.
 
 ## Local Setup
 
-### 1. Clone the repository
-
-```bash
-git clone <your-repo-url>
-cd chapchap
-```
-
-### 2. Set up the backend
+### 1. Backend
 
 ```bash
 cd chapchap-backend
@@ -280,130 +263,167 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Create:
+Create `chapchap-backend/backend/.env` using `chapchap-backend/.env.example` as a guide.
 
-```text
-chapchap-backend/backend/.env
-```
-
-Then run:
+Run:
 
 ```bash
 python backend/manage.py migrate
 python backend/manage.py runserver
 ```
 
-### 3. Set up the frontend
+Backend defaults to:
 
-Open a new terminal:
+```text
+http://127.0.0.1:8000
+```
+
+### 2. Frontend
 
 ```bash
 cd chapchap-frontend
 npm install
 ```
 
-Create:
+Create `chapchap-frontend/.env.local` using `chapchap-frontend/.env.local.example` as a guide.
 
-```text
-chapchap-frontend/.env.local
-```
-
-Then run:
+Run:
 
 ```bash
 npm run dev
 ```
 
-### 4. Optional contract commands
+Frontend defaults to:
 
-From the repo root:
-
-```bash
-npm install
-npm run compile:contracts
-npm run deploy:etherlink-testnet
-npm run read:etherlink-testnet
+```text
+http://localhost:3000
 ```
 
-### 5. Open the app
+### 3. Zama Contracts
 
-- Frontend: `http://localhost:3000`
-- Backend: `http://127.0.0.1:8000`
+```bash
+cd contracts-zama
+npm install
+npm run compile
+```
+
+Deploy to Sepolia:
+
+```bash
+npm run deploy:sepolia
+```
 
 ## Environment Variables
 
-### Backend
+### Frontend
 
-Use placeholders like these in `chapchap-backend/backend/.env`:
+```env
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+NEXT_PUBLIC_ENABLE_DEV_AUTH=false
+NEXT_PUBLIC_ZAMA_CORE_CONTRACT_ADDRESS=0xa3D96Dc13BDF9FD34Ae0003ab99E4C686802523A
+NEXT_PUBLIC_ZAMA_CHAIN_ID=11155111
+NEXT_PUBLIC_ZAMA_EXPLORER_BASE_URL=https://sepolia.etherscan.io
+NEXT_PUBLIC_ZAMA_SDK_SOURCE=package
+```
+
+Optional frontend overrides:
+
+```env
+NEXT_PUBLIC_ZAMA_RELAYER_URL=https://relayer.testnet.zama.org
+NEXT_PUBLIC_ZAMA_SDK_CDN_URL=https://cdn.zama.ai/relayer-sdk-js/0.2.0/relayer-sdk-js.js
+```
+
+Do not expose Google client secrets or private keys through `NEXT_PUBLIC_*` variables.
+
+### Backend
 
 ```env
 DJANGO_SETTINGS_MODULE=config.settings.dev
 SECRET_KEY=change-me
 DEBUG=True
 ALLOWED_HOSTS=127.0.0.1,localhost
+CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+CORS_ALLOWED_ORIGIN_REGEXES=^https://.*\.vercel\.app$
+CSRF_TRUSTED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 DATABASE_URL=your-database-url
-
-GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 GOOGLE_OAUTH_VERIFY_AUDIENCE=True
-
+GOOGLE_AUTH_HTTP_TIMEOUT_SECONDS=10
 GEMINI_API_KEY=your-gemini-api-key
 GEMINI_MODEL=gemini-3-flash-preview
-
-WALLET_ENCRYPTION_KEY=your-generated-fernet-key
-BALANCE_REFRESH_TTL_SECONDS=20
-
-BLOCKCHAIN_NETWORK=etherlink_testnet
-ETHERLINK_TESTNET_RPC_URL=https://your-etherlink-rpc
-ETHERLINK_TESTNET_CHAIN_ID=128123
-ETHERLINK_TESTNET_EXPLORER_BASE_URL=https://testnet.explorer.etherlink.com
-ETHERLINK_TESTNET_SENDER_PRIVATE_KEY=your-funded-testnet-private-key
-ETHERLINK_TESTNET_SENDER_ADDRESS=optional-derived-or-explicit-address
-ETHERLINK_TESTNET_USDC_ADDRESS=
-
-CHAPCHAP_PAYMENT_REGISTRY_ENABLED=True
-CHAPCHAP_PAYMENT_REGISTRY_ADDRESS=0x9f68816F73bCf4A01b73dc75A1f0012AD7362d35
+SEPOLIA_RPC_URL=https://your-sepolia-rpc
+ZAMA_CORE_CONTRACT_ADDRESS=0xa3D96Dc13BDF9FD34Ae0003ab99E4C686802523A
+ZAMA_CHAIN_ID=11155111
+ZAMA_EXPLORER_BASE_URL=https://sepolia.etherscan.io
 ```
 
-### Frontend
-
-Use placeholders like these in `chapchap-frontend/.env.local`:
+### Contracts
 
 ```env
-NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
-NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-client-id
-NEXT_PUBLIC_ENABLE_DEV_AUTH=false
+SEPOLIA_RPC_URL=https://your-sepolia-rpc
+SEPOLIA_PRIVATE_KEY=your-deployer-private-key
 ```
 
-### Database note
+Never commit real `.env` files or private keys.
 
-- Local development should use your provider's external PostgreSQL URL.
-- Render production should use Render's internal PostgreSQL URL.
-- The app uses `DATABASE_URL` as the single source of truth, so no code changes are needed between environments.
+## Deployment Notes
 
-## Team
+Frontend deployment:
 
-Add team details here before submission.
+- Vercel root directory should be `chapchap-frontend`.
+- Build command: `npm run build`.
+- Output is handled by Next.js.
+- Set all required `NEXT_PUBLIC_*` variables in Vercel.
 
-- Name: `TBD`
-- Role: `TBD`
+Backend deployment:
 
-- Name: `TBD`
-- Role: `TBD`
+- Render root directory should be `chapchap-backend`.
+- Run migrations before or during deploy.
+- Use `DJANGO_SETTINGS_MODULE=config.settings.prod`.
+- Set `DEBUG=False`.
+- Set `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, and `CSRF_TRUSTED_ORIGINS` for the deployed frontend domain.
 
-- Name: `TBD`
-- Role: `TBD`
+Production URLs used during current development:
 
-## Future Improvements
+- Frontend: `https://chapchap-rho.vercel.app`
+- Backend: `https://chapchap-at9y.onrender.com`
+- Explorer: `https://sepolia.etherscan.io`
 
-- real onchain swap execution
-- real savings protocol integration
-- full Bitrefill purchase flow
-- smarter scheduled transaction execution and retries
-- richer portfolio analytics and recommendation quality
-- stronger multi-asset support
-- production-grade custody and key management architecture
-- wallet export and recovery flows
+## Verification
+
+Frontend:
+
+```bash
+cd chapchap-frontend
+npm run lint
+npm run build
+```
+
+Backend:
+
+```bash
+cd chapchap-backend
+.venv\Scripts\activate
+python backend/manage.py check
+```
+
+Contracts:
+
+```bash
+cd contracts-zama
+npm run compile
+```
+
+## MVP Limitations
+
+- First backend request on a free Render service can be slow while the service wakes.
+- Confidential transfers require the sender to have deposited into their ChapChap contract balance first.
+- `euint64` limits supported ETH amounts to tiny testnet values for the MVP.
+- Agreement escrow ETH is public in the current contract.
+- Savings unlock tracking exists in the backend/UI, but no automated keeper returns funds automatically.
+- Zama relayer availability can affect encrypted input generation. The app retries and offers public transfer fallback.
 
 ## License
 
-MIT License
+MIT
