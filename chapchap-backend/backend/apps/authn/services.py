@@ -6,6 +6,27 @@ from google.auth.transport.requests import Request
 from google.oauth2 import id_token
 
 
+class GoogleAuthTimeoutRequest(Request):
+    def __call__(
+        self,
+        url,
+        method="GET",
+        body=None,
+        headers=None,
+        timeout=120,
+        **kwargs,
+    ):
+        configured_timeout = settings.GOOGLE_AUTH_HTTP_TIMEOUT_SECONDS
+        return super().__call__(
+            url,
+            method=method,
+            body=body,
+            headers=headers,
+            timeout=min(timeout, configured_timeout),
+            **kwargs,
+        )
+
+
 class GoogleAuthError(Exception):
     """Base exception for Google authentication failures."""
 
@@ -47,7 +68,7 @@ def verify_google_id_token(token: str) -> GoogleUserInfo:
 
         payload: dict[str, Any] = id_token.verify_oauth2_token(
             token,
-            Request(),
+            GoogleAuthTimeoutRequest(),
             audience=audience,
         )
     except Exception as exc:  # noqa: BLE001

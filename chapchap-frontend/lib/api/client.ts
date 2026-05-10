@@ -1,7 +1,14 @@
 import { getAuthToken } from "@/lib/auth-storage";
 
+const DEFAULT_API_BASE_URL =
+  process.env.NODE_ENV === "production"
+    ? "https://chapchap-at9y.onrender.com"
+    : "http://127.0.0.1:8000";
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+  (process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || DEFAULT_API_BASE_URL).replace(
+    /\/+$/,
+    "",
+  );
 
 export class ApiError extends Error {
   status: number;

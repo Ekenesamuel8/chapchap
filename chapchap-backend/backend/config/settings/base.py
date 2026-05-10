@@ -24,6 +24,16 @@ def _get_list(name: str, default: list[str] | None = None) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _get_host_list(name: str, default: list[str] | None = None) -> list[str]:
+    hosts: list[str] = []
+    for item in _get_list(name, default=default):
+        parsed = urlparse(item if "://" in item else f"//{item}")
+        host = (parsed.netloc or parsed.path).strip().strip("/")
+        if host:
+            hosts.append(host)
+    return hosts
+
+
 def _describe_database_url(database_url: str | None) -> dict[str, str]:
     if not database_url:
         return {"host": "unset", "kind": "unset"}
@@ -46,7 +56,15 @@ SECRET_KEY = os.environ.get(
     "django-insecure-change-me",
 )
 DEBUG = _get_bool("DEBUG", default=False)
-ALLOWED_HOSTS = _get_list("ALLOWED_HOSTS", default=["127.0.0.1", "localhost", "chapchap-rho.vercel.app", "chapchap-at9y.onrender.com"])
+ALLOWED_HOSTS = _get_host_list(
+    "ALLOWED_HOSTS",
+    default=[
+        "127.0.0.1",
+        "localhost",
+        "chapchap-rho.vercel.app",
+        "chapchap-at9y.onrender.com",
+    ],
+)
 
 DJANGO_APPS = [
     "django.contrib.admin",
@@ -81,23 +99,35 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "corsheaders.middleware.CorsMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://chapchap-rho.vercel.app",
-    "https://chapchap-at9y.onrender.com",
-]
+CORS_ALLOWED_ORIGINS = _get_list(
+    "CORS_ALLOWED_ORIGINS",
+    default=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://chapchap-rho.vercel.app",
+        "https://chapchap-at9y.onrender.com",
+    ],
+)
+CORS_ALLOWED_ORIGIN_REGEXES = _get_list(
+    "CORS_ALLOWED_ORIGIN_REGEXES",
+    default=[r"^https://.*\.vercel\.app$"],
+)
+CORS_ALLOWED_ORIGINS = [origin.rstrip("/") for origin in CORS_ALLOWED_ORIGINS]
+CSRF_TRUSTED_ORIGINS = _get_list(
+    "CSRF_TRUSTED_ORIGINS",
+    default=CORS_ALLOWED_ORIGINS,
+)
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -156,6 +186,9 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_OAUTH_VERIFY_AUDIENCE = _get_bool(
     "GOOGLE_OAUTH_VERIFY_AUDIENCE",
     default=True,
+)
+GOOGLE_AUTH_HTTP_TIMEOUT_SECONDS = float(
+    os.environ.get("GOOGLE_AUTH_HTTP_TIMEOUT_SECONDS", "10")
 )
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
