@@ -220,7 +220,7 @@ export function LoginScreen() {
             <button
               type="button"
               onClick={handleLaunchClick}
-              className="rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black"
+              className="rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-black"
             >
               Launch App
             </button>
@@ -232,7 +232,7 @@ export function LoginScreen() {
                   block: "start",
                 })
               }
-              className="rounded-full border border-white/10 bg-white/[0.05] px-5 py-2.5 text-sm font-semibold text-white"
+              className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5 text-sm font-semibold text-white"
             >
               View Demo Flow
             </button>
