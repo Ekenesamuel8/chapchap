@@ -807,7 +807,7 @@ export function DashboardScreen() {
     } catch (error) {
       const message = mapFrontendError(
         error,
-        "The Zama Sepolia relayer is temporarily unreachable. Your funds were not moved. Try again, or use public transfer for demo.",
+        "Zama Sepolia relayer is temporarily unreachable. Funds were not moved.",
       );
       pushSystemMessage(message);
     }
@@ -1252,10 +1252,10 @@ function mapFrontendError(error: unknown, fallbackMessage: string) {
 
 function getEncryptionFailureMessage(error: unknown) {
   const message = error instanceof Error ? error.message : "";
-  if (message.includes("Your funds were not moved")) {
+  if (message.includes("Funds were not moved")) {
     return message;
   }
-  return "The Zama Sepolia relayer is temporarily unreachable. Your funds were not moved. Try again, or use public transfer for demo.";
+  return "Zama Sepolia relayer is temporarily unreachable. Funds were not moved.";
 }
 
 function createId(prefix: string) {

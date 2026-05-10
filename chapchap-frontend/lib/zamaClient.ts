@@ -4,6 +4,9 @@ import type { Eip1193Provider, Signer } from "ethers";
 const MAX_UINT64 = BigInt("18446744073709551615");
 const ZAMA_SEPOLIA_CHAIN_ID = 11155111;
 const ZAMA_RELAYER_URL_OVERRIDE = process.env.NEXT_PUBLIC_ZAMA_RELAYER_URL?.trim();
+const ZAMA_SDK_CDN_URL =
+  process.env.NEXT_PUBLIC_ZAMA_SDK_CDN_URL?.trim() ||
+  "https://cdn.zama.org/relayer-sdk-js/0.3.0-8/relayer-sdk-js.js";
 const RELAYER_OPERATION_TIMEOUT_MS = 25_000;
 const RELAYER_RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 
@@ -62,7 +65,12 @@ type ZamaInstance = {
   ) => Promise<Record<string, bigint | number | string>>;
 };
 
-type ZamaRelayerSdkModule = typeof import("@zama-fhe/relayer-sdk/web");
+type ZamaRelayerSdkModule = {
+  initSDK: () => Promise<void>;
+  createInstance: (config: Record<string, unknown>) => Promise<unknown>;
+  SepoliaConfig: Record<string, unknown>;
+  __chapchapSource?: "cdn" | "package";
+};
 
 export type ZamaEncryptionStage =
   | "preparing"
@@ -115,7 +123,7 @@ export async function initZamaRelayer(
     : sdk.SepoliaConfig;
 
   debugLog("Initializing SDK", {
-    sdkSource: "@zama-fhe/relayer-sdk/web",
+    sdkSource: sdk.__chapchapSource ?? "unknown",
     providerChainId,
     expectedChainId: ZAMA_SEPOLIA_CHAIN_ID,
     relayerUrl: sepoliaConfig.relayerUrl,
@@ -171,7 +179,10 @@ export async function initZamaRelayer(
     )
       .then((instance) => {
         debugLog("Relayer instance created", {
+          sdkSource: sdk.__chapchapSource ?? "unknown",
           relayerUrl: sepoliaConfig.relayerUrl,
+          chainId: sepoliaConfig.chainId,
+          gatewayChainId: sepoliaConfig.gatewayChainId,
         });
         return instance;
       })
@@ -223,8 +234,12 @@ export async function encryptAmount64(
       message: "Encrypting amount locally...",
     });
     ciphertexts = await withRelayerRetries(
-      () => {
-        const buffer = instance.createEncryptedInput(contractAddress, userAddress);
+      async () => {
+        const buffer = await withTimeout(
+          Promise.resolve(instance.createEncryptedInput(contractAddress, userAddress)),
+          RELAYER_OPERATION_TIMEOUT_MS,
+          "Zama encrypted input buffer creation timed out.",
+        );
         buffer.add64(amountWei);
         return withTimeout(
           buffer.encrypt(),
@@ -375,15 +390,13 @@ async function loadRelayerSdk() {
   }
 
   if (!sdkModulePromise) {
-    sdkModulePromise = import("@zama-fhe/relayer-sdk/web")
-      .then((sdkModule) => {
-        debugLog("Loaded SDK module", {
-          sdkSource: "@zama-fhe/relayer-sdk/web",
-          relayerUrl: sdkModule.SepoliaConfig.relayerUrl,
-          chainId: sdkModule.SepoliaConfig.chainId,
-          gatewayChainId: sdkModule.SepoliaConfig.gatewayChainId,
+    sdkModulePromise = loadRelayerSdkFromCdn()
+      .catch((cdnError) => {
+        console.warn("[ChapChap][Zama] CDN SDK load failed, falling back to package", {
+          cdnUrl: ZAMA_SDK_CDN_URL,
+          error: cdnError,
         });
-        return sdkModule;
+        return loadRelayerSdkFromPackage();
       })
       .catch((error) => {
         console.error("[ChapChap][Zama] SDK module import failed", error);
@@ -394,6 +407,70 @@ async function loadRelayerSdk() {
 
   const sdkModule = await sdkModulePromise;
   return sdkModule;
+}
+
+async function loadRelayerSdkFromCdn(): Promise<ZamaRelayerSdkModule> {
+  debugLog("Loading SDK module from CDN", {
+    cdnUrl: ZAMA_SDK_CDN_URL,
+  });
+  const dynamicImport = new Function(
+    "url",
+    "return import(/* webpackIgnore: true */ url)",
+  ) as (url: string) => Promise<ZamaRelayerSdkModule>;
+  const sdkModule = await withTimeout(
+    dynamicImport(ZAMA_SDK_CDN_URL),
+    RELAYER_OPERATION_TIMEOUT_MS,
+    "Zama SDK CDN loading timed out.",
+  );
+  const normalized = normalizeSdkModule(sdkModule, "cdn");
+  debugLog("Loaded SDK module", {
+    sdkSource: "cdn",
+    cdnUrl: ZAMA_SDK_CDN_URL,
+    relayerUrl: normalized.SepoliaConfig.relayerUrl,
+    chainId: normalized.SepoliaConfig.chainId,
+    gatewayChainId: normalized.SepoliaConfig.gatewayChainId,
+  });
+  return normalized;
+}
+
+async function loadRelayerSdkFromPackage(): Promise<ZamaRelayerSdkModule> {
+  const sdkModule = await import("@zama-fhe/relayer-sdk/web");
+  const normalized = normalizeSdkModule(sdkModule, "package");
+  debugLog("Loaded SDK module", {
+    sdkSource: "@zama-fhe/relayer-sdk/web",
+    relayerUrl: normalized.SepoliaConfig.relayerUrl,
+    chainId: normalized.SepoliaConfig.chainId,
+    gatewayChainId: normalized.SepoliaConfig.gatewayChainId,
+  });
+  return normalized;
+}
+
+function normalizeSdkModule(
+  sdkModule: unknown,
+  source: "cdn" | "package",
+): ZamaRelayerSdkModule {
+  if (!sdkModule || typeof sdkModule !== "object") {
+    throw new Error("Zama SDK module did not load as an object.");
+  }
+  const initSDK = Reflect.get(sdkModule, "initSDK");
+  const createInstance = Reflect.get(sdkModule, "createInstance");
+  const SepoliaConfig = Reflect.get(sdkModule, "SepoliaConfig");
+
+  if (
+    typeof initSDK !== "function" ||
+    typeof createInstance !== "function" ||
+    !SepoliaConfig ||
+    typeof SepoliaConfig !== "object"
+  ) {
+    throw new Error("Zama SDK module is missing initSDK, createInstance, or SepoliaConfig.");
+  }
+
+  return {
+    initSDK: initSDK as ZamaRelayerSdkModule["initSDK"],
+    createInstance: createInstance as ZamaRelayerSdkModule["createInstance"],
+    SepoliaConfig: SepoliaConfig as Record<string, unknown>,
+    __chapchapSource: source,
+  };
 }
 
 function resolveEip1193Provider(providerOrSigner: unknown): Eip1193Provider {
@@ -466,7 +543,7 @@ function toUserFacingEncryptionError(error: unknown) {
 
   if (lowered.includes("404") || lowered.includes("not found")) {
     return new Error(
-      "The Zama Sepolia relayer is temporarily unreachable. Your funds were not moved. Try again, or use public transfer for demo.",
+      "Zama Sepolia relayer is temporarily unreachable. Funds were not moved.",
     );
   }
 
@@ -478,7 +555,7 @@ function toUserFacingEncryptionError(error: unknown) {
     lowered.includes("relayer")
   ) {
     return new Error(
-      "The Zama Sepolia relayer is temporarily unreachable. Your funds were not moved. Try again, or use public transfer for demo.",
+      "Zama Sepolia relayer is temporarily unreachable. Funds were not moved.",
     );
   }
 
@@ -505,6 +582,7 @@ async function withRelayerRetries<T>(
       const retryNumber = attempt;
       const shouldRetry = attempt <= maxRetries && isRetryableRelayerError(error);
       console.warn(`[ChapChap][Zama] ${label} attempt failed`, {
+        failingStep: label,
         attempt,
         maxAttempts: maxRetries + 1,
         retrying: shouldRetry,
