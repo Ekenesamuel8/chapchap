@@ -18,15 +18,22 @@ export class ApiError extends Error {
 type RequestOptions = Omit<RequestInit, "body"> & {
   body?: unknown;
   token?: string | null;
+  timeoutMs?: number;
 };
 
 export async function apiRequest<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const { body, headers, token, ...rest } = options;
+  const { body, headers, token, timeoutMs, signal, ...rest } = options;
   const resolvedToken = token ?? getAuthToken();
   const requestHeaders = new Headers(headers);
+  const timeoutController =
+    timeoutMs && timeoutMs > 0 ? new AbortController() : null;
+  const timeoutId = timeoutController
+    ? globalThis.setTimeout(() => timeoutController.abort(), timeoutMs)
+    : null;
+  const requestSignal = mergeSignals(signal, timeoutController?.signal ?? null);
 
   requestHeaders.set("Accept", "application/json");
 
@@ -38,12 +45,25 @@ export async function apiRequest<T>(
     requestHeaders.set("Authorization", `Token ${resolvedToken}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...rest,
-    headers: requestHeaders,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    cache: "no-store",
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...rest,
+      headers: requestHeaders,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      cache: "no-store",
+      signal: requestSignal,
+    });
+  } catch (error) {
+    if (timeoutController?.signal.aborted) {
+      throw new ApiError("Backend is waking up, please retry.", 408, null);
+    }
+    throw error;
+  } finally {
+    if (timeoutId) {
+      globalThis.clearTimeout(timeoutId);
+    }
+  }
 
   const text = await response.text();
   const data = text ? tryParseJson(text) : null;
@@ -75,3 +95,17 @@ function getApiErrorMessage(data: unknown): string {
 }
 
 export { API_BASE_URL };
+
+function mergeSignals(
+  originalSignal: AbortSignal | null | undefined,
+  timeoutSignal: AbortSignal | null,
+) {
+  if (!originalSignal) return timeoutSignal ?? undefined;
+  if (!timeoutSignal) return originalSignal;
+
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  originalSignal.addEventListener("abort", abort, { once: true });
+  timeoutSignal.addEventListener("abort", abort, { once: true });
+  return controller.signal;
+}

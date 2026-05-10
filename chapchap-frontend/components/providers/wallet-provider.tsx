@@ -13,7 +13,6 @@ import { BrowserProvider, Contract, formatEther } from "ethers";
 import type { Signer } from "ethers";
 import { useAuth } from "@/components/providers/auth-provider";
 import {
-  getStoredWalletConnectionPreference,
   setStoredWalletConnectionPreference,
 } from "@/lib/auth-storage";
 import {
@@ -89,11 +88,6 @@ export function WalletProvider({ children }: PropsWithChildren) {
     setPrivateBalanceHandle(null);
     setPrivateBalanceError(null);
   }, []);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    setWalletEnabled(getStoredWalletConnectionPreference());
-  }, [hydrated]);
 
   useEffect(() => {
     if (hydrated && !isAuthenticated) {
@@ -216,11 +210,6 @@ export function WalletProvider({ children }: PropsWithChildren) {
     },
     [resetWalletState],
   );
-
-  useEffect(() => {
-    if (!hydrated || !isAuthenticated || !walletEnabled) return;
-    void refreshWalletState();
-  }, [hydrated, isAuthenticated, refreshWalletState, walletEnabled]);
 
   useEffect(() => {
     if (!connectedAddress || !walletEnabled) return;

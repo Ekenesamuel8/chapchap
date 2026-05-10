@@ -100,6 +100,7 @@ export function LoginScreen() {
       window.google.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
         callback: async (response) => {
+          console.info("[ChapChap][Auth] Google credential received");
           if (!response.credential) {
             setError("Google sign-in did not return a valid credential.");
             return;
@@ -110,6 +111,7 @@ export function LoginScreen() {
 
           try {
             await loginWithGoogleIdToken(response.credential);
+            console.info("[ChapChap][Auth] dashboard route started");
             router.replace("/dashboard");
           } catch (submissionError) {
             setError(getFriendlyError(submissionError));
@@ -402,6 +404,9 @@ export function LoginScreen() {
 }
 
 function getFriendlyError(error: unknown) {
+  if (error instanceof Error && error.message.includes("Backend is waking up")) {
+    return "Backend is waking up, please retry.";
+  }
   if (error instanceof Error && error.message) return error.message;
   return "I couldn't complete sign-in. Please try again.";
 }

@@ -121,6 +121,7 @@ export function DashboardScreen() {
     }
     if (hasStartedInitialLoadRef.current) return;
     hasStartedInitialLoadRef.current = true;
+    console.info("[ChapChap][Auth] dashboard route completed");
     clearStoredChatSession();
     setChatItems([INITIAL_ASSISTANT_MESSAGE]);
     setPendingAction(null);
