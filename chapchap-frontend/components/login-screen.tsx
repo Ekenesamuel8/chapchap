@@ -96,7 +96,7 @@ export function LoginScreen() {
       apiBaseUrl: API_BASE_URL,
     });
 
-    fetch(`${API_BASE_URL}/api/me/`, {
+    fetch(`${API_BASE_URL}/api/health/`, {
       method: "GET",
       headers: {
         Accept: "application/json",
