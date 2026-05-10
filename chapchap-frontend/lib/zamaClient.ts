@@ -3,10 +3,26 @@ import type { Eip1193Provider, Signer } from "ethers";
 
 const MAX_UINT64 = BigInt("18446744073709551615");
 const ZAMA_SEPOLIA_CHAIN_ID = 11155111;
-const ZAMA_RELAYER_URL_OVERRIDE = process.env.NEXT_PUBLIC_ZAMA_RELAYER_URL?.trim();
+const RAW_ZAMA_RELAYER_URL_OVERRIDE = process.env.NEXT_PUBLIC_ZAMA_RELAYER_URL?.trim();
+const IGNORED_LEGACY_ZAMA_RELAYER_URL =
+  RAW_ZAMA_RELAYER_URL_OVERRIDE?.includes("relayer.testnet.zama.cloud") ?? false;
+const ZAMA_RELAYER_URL_OVERRIDE = IGNORED_LEGACY_ZAMA_RELAYER_URL
+  ? undefined
+  : RAW_ZAMA_RELAYER_URL_OVERRIDE;
+const REQUESTED_ZAMA_SDK_SOURCE =
+  process.env.NEXT_PUBLIC_ZAMA_SDK_SOURCE?.trim().toLowerCase() ?? "package";
+const HAS_EXPLICIT_ZAMA_SDK_CDN_URL = Boolean(
+  process.env.NEXT_PUBLIC_ZAMA_SDK_CDN_URL?.trim(),
+);
+const ZAMA_SDK_SOURCE =
+  REQUESTED_ZAMA_SDK_SOURCE === "cdn" && HAS_EXPLICIT_ZAMA_SDK_CDN_URL
+    ? "cdn"
+    : "package";
+const IGNORED_CDN_SOURCE_WITHOUT_URL =
+  REQUESTED_ZAMA_SDK_SOURCE === "cdn" && !HAS_EXPLICIT_ZAMA_SDK_CDN_URL;
 const ZAMA_SDK_CDN_URL =
   process.env.NEXT_PUBLIC_ZAMA_SDK_CDN_URL?.trim() ||
-  "https://cdn.zama.org/relayer-sdk-js/0.3.0-8/relayer-sdk-js.js";
+  "https://cdn.zama.ai/relayer-sdk-js/0.2.0/relayer-sdk-js.js";
 const RELAYER_OPERATION_TIMEOUT_MS = 25_000;
 const RELAYER_RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 
@@ -121,6 +137,13 @@ export async function initZamaRelayer(
         relayerUrl: ZAMA_RELAYER_URL_OVERRIDE,
       }
     : sdk.SepoliaConfig;
+
+  if (IGNORED_LEGACY_ZAMA_RELAYER_URL) {
+    console.warn("[ChapChap][Zama] Ignoring stale relayer override", {
+      configuredRelayerUrl: RAW_ZAMA_RELAYER_URL_OVERRIDE,
+      sdkRelayerUrl: sepoliaConfig.relayerUrl,
+    });
+  }
 
   debugLog("Initializing SDK", {
     sdkSource: sdk.__chapchapSource ?? "unknown",
@@ -390,23 +413,52 @@ async function loadRelayerSdk() {
   }
 
   if (!sdkModulePromise) {
-    sdkModulePromise = loadRelayerSdkFromCdn()
-      .catch((cdnError) => {
-        console.warn("[ChapChap][Zama] CDN SDK load failed, falling back to package", {
-          cdnUrl: ZAMA_SDK_CDN_URL,
-          error: cdnError,
-        });
-        return loadRelayerSdkFromPackage();
-      })
-      .catch((error) => {
-        console.error("[ChapChap][Zama] SDK module import failed", error);
-        sdkModulePromise = null;
-        throw new Error("The Zama Relayer SDK could not be loaded in this browser.");
-      });
+    sdkModulePromise = loadRelayerSdkByPreference().catch((error) => {
+      console.error("[ChapChap][Zama] SDK module import failed", error);
+      sdkModulePromise = null;
+      throw new Error("The Zama Relayer SDK could not be loaded in this browser.");
+    });
   }
 
   const sdkModule = await sdkModulePromise;
   return sdkModule;
+}
+
+async function loadRelayerSdkByPreference(): Promise<ZamaRelayerSdkModule> {
+  debugLog("Resolving SDK module", {
+    requestedSource: REQUESTED_ZAMA_SDK_SOURCE,
+    sourcePreference: ZAMA_SDK_SOURCE,
+    hasExplicitCdnUrl: HAS_EXPLICIT_ZAMA_SDK_CDN_URL,
+    cdnUrl: HAS_EXPLICIT_ZAMA_SDK_CDN_URL ? ZAMA_SDK_CDN_URL : "not configured",
+  });
+
+  if (IGNORED_CDN_SOURCE_WITHOUT_URL) {
+    console.warn("[ChapChap][Zama] Ignoring CDN SDK preference without explicit CDN URL", {
+      fallbackSource: "package",
+    });
+  }
+
+  if (ZAMA_SDK_SOURCE === "cdn") {
+    return loadRelayerSdkFromCdn().catch((cdnError) => {
+      console.warn("[ChapChap][Zama] CDN SDK load failed, falling back to package", {
+        cdnUrl: ZAMA_SDK_CDN_URL,
+        error: cdnError,
+      });
+      return loadRelayerSdkFromPackage();
+    });
+  }
+
+  return loadRelayerSdkFromPackage().catch((packageError) => {
+    if (!HAS_EXPLICIT_ZAMA_SDK_CDN_URL) {
+      throw packageError;
+    }
+
+    console.warn("[ChapChap][Zama] Package SDK load failed, trying configured CDN", {
+      cdnUrl: ZAMA_SDK_CDN_URL,
+      error: packageError,
+    });
+    return loadRelayerSdkFromCdn();
+  });
 }
 
 async function loadRelayerSdkFromCdn(): Promise<ZamaRelayerSdkModule> {

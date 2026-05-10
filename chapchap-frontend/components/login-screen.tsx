@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { GoogleIcon } from "@/components/icons";
 import { useAuth } from "@/components/providers/auth-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { API_BASE_URL } from "@/lib/api/client";
 
 const GOOGLE_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
@@ -85,6 +86,44 @@ export function LoginScreen() {
       router.replace("/dashboard");
     }
   }, [hydrated, isAuthenticated, router]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const startedAt = performance.now();
+    const timeoutId = window.setTimeout(() => controller.abort(), 12_000);
+
+    console.info("[ChapChap][Auth] backend warmup started", {
+      apiBaseUrl: API_BASE_URL,
+    });
+
+    fetch(`${API_BASE_URL}/api/me/`, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then((response) => {
+        console.info("[ChapChap][Auth] backend warmup completed", {
+          status: response.status,
+          durationMs: Math.round(performance.now() - startedAt),
+        });
+      })
+      .catch((warmupError) => {
+        if (controller.signal.aborted) {
+          console.info("[ChapChap][Auth] backend warmup still pending after timeout");
+          return;
+        }
+        console.warn("[ChapChap][Auth] backend warmup failed", warmupError);
+      })
+      .finally(() => window.clearTimeout(timeoutId));
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, []);
 
   useEffect(() => {
     if (!GOOGLE_CLIENT_ID) {
@@ -352,6 +391,11 @@ export function LoginScreen() {
                   Loading secure Google sign-in...
                 </p>
               ) : null}
+              {isSubmitting ? (
+                <p className="mt-4 text-sm text-white/[0.55]">
+                  Signing you in. If the backend was asleep, this may take a moment.
+                </p>
+              ) : null}
             </div>
 
             {error ? (
@@ -404,8 +448,12 @@ export function LoginScreen() {
 }
 
 function getFriendlyError(error: unknown) {
-  if (error instanceof Error && error.message.includes("Backend is waking up")) {
-    return "Backend is waking up, please retry.";
+  if (
+    error instanceof Error &&
+    (error.message.includes("Backend is waking up") ||
+      error.message.includes("Backend is still starting"))
+  ) {
+    return "Backend is still starting. Please try again in a moment.";
   }
   if (error instanceof Error && error.message) return error.message;
   return "I couldn't complete sign-in. Please try again.";

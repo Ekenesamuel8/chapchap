@@ -67,9 +67,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   const loginWithGoogleIdToken = useCallback(async (idToken: string) => {
+    const startedAt = performance.now();
     console.info("[ChapChap][Auth] auth request started");
     const response = await requestGoogleLogin(idToken);
-    console.info("[ChapChap][Auth] auth response received");
+    console.info("[ChapChap][Auth] auth response received", {
+      durationMs: Math.round(performance.now() - startedAt),
+    });
     setSession(response.token, response.user);
   }, [setSession]);
 

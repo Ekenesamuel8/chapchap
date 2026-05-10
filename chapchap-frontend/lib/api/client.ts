@@ -56,7 +56,11 @@ export async function apiRequest<T>(
     });
   } catch (error) {
     if (timeoutController?.signal.aborted) {
-      throw new ApiError("Backend is waking up, please retry.", 408, null);
+      throw new ApiError(
+        "Backend is still starting. Please try again in a moment.",
+        408,
+        null,
+      );
     }
     throw error;
   } finally {
